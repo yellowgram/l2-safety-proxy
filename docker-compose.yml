@@ -1,0 +1,19 @@
+services:
+  l2-send-guard:
+    build: .
+    ports:
+      - "8545:8545"
+    environment:
+      L2SG_HOST: "0.0.0.0"
+      L2SG_PORT: "8545"
+      L2SG_FAIL_OPEN: "true"
+      L2SG_CHAINS: "arb-sepolia,base-sepolia"
+      L2SG_DEFAULT_CHAIN: "arb-sepolia"
+      # Optional overrides — use public defaults if unset
+      # L2SG_RPC_ARB_SEPOLIA: https://sepolia-rollup.arbitrum.io/rpc
+      # L2SG_RPC_BASE_SEPOLIA: https://sepolia.base.org
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8545/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
