@@ -1,7 +1,7 @@
 {
   "name": "l2-send-guard",
-  "version": "0.1.0",
-  "description": "Multi-L2 pre-broadcast JSON-RPC safety middleware — simulate eth_sendRawTransaction, abort definite reverts, fail-open on uncertainty",
+  "version": "0.2.0",
+  "description": "Multi-L2 pre-broadcast JSON-RPC safety middleware \u2014 simulate eth_sendRawTransaction, abort definite reverts, fail-open on uncertainty",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -13,7 +13,8 @@
     "dev": "tsx src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "bench": "tsx scripts/bench.ts"
   },
   "engines": {
     "node": ">=20"
@@ -37,5 +38,16 @@
     "tsx": "^4.19.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
-  }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/api.d.ts",
+      "import": "./dist/api.js"
+    },
+    "./sdk": {
+      "types": "./dist/sdk/index.d.ts",
+      "import": "./dist/sdk/index.js"
+    }
+  },
+  "types": "./dist/api.d.ts"
 }

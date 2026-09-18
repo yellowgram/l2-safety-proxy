@@ -5,3 +5,4 @@ export { simulateRawTransaction } from "./sim/simulator.js";
 export { handleRequest, handlePayload } from "./proxy/handler.js";
 export { createServer, listen } from "./proxy/server.js";
 export * from "./types/index.js";
+export * from "./sdk/index.js";

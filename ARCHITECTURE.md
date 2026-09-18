@@ -98,8 +98,11 @@ Hosted SaaS, billing, indexing, MEV, tokens, private-key custody, Safe-enterpris
 src/
   config/     chain templates + env loader
   decode/     revert decoding
-  sim/        eth_simulateV1 + eth_call + tx parse
+  sim/        eth_simulateV1 + eth_call + tx parse + capability cache
   proxy/      HTTP JSON-RPC server + intercept handler
+  sdk/        thin viem / ethers v6 provider helpers (no key custody)
   types/      shared types
+scripts/      mocked latency bench (`npm run bench`)
 tests/        unit + mocked integration (no secrets)
+BENCH.md      raw vs guarded send methodology
 ```

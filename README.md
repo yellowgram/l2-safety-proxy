@@ -61,6 +61,23 @@ See [.env.example](./.env.example).
 | `npm run build` | Compile TypeScript → `dist/` |
 | `npm start` | Run proxy |
 | `npm run dev` | Run via `tsx` (no build) |
+| `npm run bench` | Mocked latency: raw send vs guarded send (see [BENCH.md](./BENCH.md)) |
+
+
+## Client SDK (wallets / agents)
+
+Thin helpers in `src/sdk/` wire viem or ethers v6 to the proxy URL + `x-l2sg-chain` header. **No key custody** — you keep signing locally.
+
+```ts
+import { http } from "viem";
+import { viemHttpArgs } from "l2-send-guard";
+
+const transport = http(
+  ...viemHttpArgs({ proxyUrl: "http://127.0.0.1:8545", chain: "base-sepolia" })
+);
+```
+
+Full examples (viem + ethers v6): [src/sdk/README.md](./src/sdk/README.md). Latency methodology: [BENCH.md](./BENCH.md).
 
 ## Demo
 

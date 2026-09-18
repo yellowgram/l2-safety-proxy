@@ -1,9 +1,44 @@
 # Sepolia live smoke
 
-**Run time:** 2026-09-18 16:22–16:24 EDT  
-**Result:** PASS for proxy startup, health, and read-only RPC forwarding; the guarded-send attempt was safely not broadcast and exposed a live `eth_simulateV1` compatibility limitation.
+## Re-smoke (capability-cache) — 2026-09-18 22:49 EDT
 
-## Configuration
+**Result:** PASS — guarded send on Base Sepolia now aborts definite reverts via `eth_call` after unsupported `eth_simulateV1`, and the process-lifetime capability cache skips V1 on subsequent sends.
+
+### Configuration
+
+- Proxy loaded from local gitignored `.env` / defaults (public RPCs only).
+- **Base Sepolia public RPC:** `https://sepolia.base.org`
+- Ephemeral unfunded signer created in memory and discarded (no keys stored or committed).
+- Zero-value EIP-1559 tx to Base Sepolia USDC (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) with calldata `0xdeadbeef`.
+- No capital, no mainnet, no broadcast of a successful send.
+
+### Checks
+
+| Check | Result |
+| --- | --- |
+| `GET /health` | **PASS** — `ok: true`, chains include `base-sepolia`, `failOpen: true` |
+| Control `eth_call` (same to/data) via proxy | **PASS** — upstream `code: 3, message: execution reverted` |
+| Guarded `eth_sendRawTransaction` #1 | **PASS** — JSON-RPC **`-32080`**, `confidence: definite`, `simMethod: eth_call`, `aborted: true` (~193ms) |
+| Capability cache after #1 | **PASS** — upstream URL marked V1-unsupported (`count: 1`) |
+| Guarded send #2 (same raw) | **PASS** — again **`-32080`** / `eth_call` (~105ms, faster; cache count still `1`) |
+
+Reproduce (after `npm run build`):
+
+```bash
+node scripts/live-smoke-cache.mjs
+```
+
+### Interpretation
+
+Base Sepolia public RPC still rejects the proxy’s `eth_simulateV1` shape with **`-32602 Invalid params`**. The guard marks that upstream unsupported, falls back to **`eth_call` before fail-open**, and aborts on definite revert. Subsequent sends do **not** re-probe V1 for the process lifetime (verified by cache flag + lower latency on send #2). Fail-open remains for uncertain sims; this smoke exercised the definite-abort branch only.
+
+---
+
+## Earlier smoke — 2026-09-18 16:22–16:24 EDT
+
+**Result:** PASS for proxy startup, health, and read-only RPC forwarding; the guarded-send attempt was safely not broadcast and exposed a live `eth_simulateV1` compatibility limitation (since hardened — see re-smoke above).
+
+### Configuration
 
 - Created a local, gitignored `.env` from `.env.example`.
 - Configured the public, no-key endpoints by name:
@@ -11,7 +46,7 @@
   - **Base Sepolia public RPC:** `https://sepolia.base.org`
 - No API keys, user private keys, funded accounts, or mainnet endpoints were used. `.env` was not committed.
 
-## Checks run
+### Checks run
 
 The proxy was built with `npm run build` and started locally at `http://127.0.0.1:8545`.
 
@@ -25,23 +60,10 @@ The proxy was built with `npm run build` and started locally at `http://127.0.0.
 
 The same read-only calls also succeeded directly against both named public endpoints. No rate limiting or HTTP failures occurred during this run.
 
-## Safe revert/simulation attempt
+### Safe revert/simulation attempt (pre-hardening)
 
-To exercise the guarded send path without capital, an ephemeral, unfunded signer was created in memory and discarded after the request. It signed a zero-value EIP-1559 transaction for Base Sepolia with:
+On that first run, Base Sepolia returned `-32602` for `eth_simulateV1` and the guard **fail-opened** without trying `eth_call` first; upstream then rejected the unfunded send (`-32003`). Safe (no funds / no tx hash) but not a definite-revert abort.
 
-- target: Base Sepolia USDC (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`)
-- calldata: `0xdeadbeef` (a known-reverting selector for this contract)
-- value: `0`
-- no transaction was broadcast
+### Hardening (post first smoke)
 
-As a control, the equivalent `eth_call` through the proxy returned the expected upstream JSON-RPC error `code: 3, message: execution reverted`.
-
-The `eth_sendRawTransaction` guard attempt reached the simulation path, but Base Sepolia returned `-32602 Invalid params` for the proxy's `eth_simulateV1` request. The guard correctly classified that as uncertain and fail-opened; the subsequent upstream send was rejected for insufficient funds (`-32003`). This is a **safe outcome**: no funds existed and no transaction hash was returned. It is not evidence that the definite-revert abort branch fired.
-
-## Limitations / follow-up
-
-- Public RPC behavior and rate limits can change. This run saw no rate limiting.
-- **Finding (Base Sepolia public RPC):** `eth_simulateV1` returned **`-32602 Invalid params`** for the proxy's request shape. On that smoke run the guard classified the V1 error as uncertain and fail-opened without trying `eth_call` first — so the definite-revert abort (`-32080`) did not fire even though a control `eth_call` clearly reverted.
-- **Hardening (post-smoke):** unsupported / invalid-params V1 (`-32601` / `-32602`) now **falls back to `eth_call` before fail-open**; the upstream is **capability-cached** so subsequent sends skip V1 for the process lifetime; optional `L2SG_RPC_FALLBACK_*` can supply an alternate sim RPC. Unit/mocked tests cover: unsupported V1 → eth_call definite revert → abort; unsupported V1 + eth_call fail → fail-open.
-- A future live smoke on Base Sepolia should re-check the guarded send path and expect `-32080` when `eth_call` sees a definite revert (even if V1 remains `-32602`).
-- The smoke used only read calls and a deliberately unfunded, zero-value simulation request; no private key was stored or committed and no mainnet value transfer was attempted.
+Unsupported / invalid-params V1 (`-32601` / `-32602`) now **falls back to `eth_call` before fail-open**; the upstream is **capability-cached**; optional `L2SG_RPC_FALLBACK_*` can supply an alternate sim RPC. Confirmed live in the re-smoke section above.
