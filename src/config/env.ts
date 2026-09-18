@@ -35,13 +35,13 @@ function buildChain(key: string): ChainConfig | null {
 
 /**
  * Load config from environment.
- * Enable chains via L2SG_CHAINS=arb-sepolia,base-sepolia (default both).
+ * Enable chains via L2SG_CHAINS=arb-sepolia,op-sepolia,base-sepolia (default all three).
  */
 export function loadConfig(): GuardConfig {
   const listenHost = env("L2SG_HOST", "127.0.0.1")!;
   const listenPort = Number(env("L2SG_PORT", "8545"));
   const failOpen = boolEnv("L2SG_FAIL_OPEN", true);
-  const chainKeys = (env("L2SG_CHAINS", "arb-sepolia,base-sepolia")!)
+  const chainKeys = (env("L2SG_CHAINS", "arb-sepolia,op-sepolia,base-sepolia")!)
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);

@@ -102,4 +102,6 @@ await fetch(url, {
 
 - **Fail-open** remains the proxy default: uncertain sims forward upstream.
 - Definite reverts return JSON-RPC `-32080` with `data.confidence: "definite"`.
+- `eth_sendTransaction` is **refused** (`-32081`) — sign externally and use `eth_sendRawTransaction`. See [docs/AGENTS.md](../../docs/AGENTS.md).
+- Chain keys: `arb-sepolia`, `op-sepolia`, `base-sepolia`.
 - No secrets belong in the SDK. Do not commit private keys.

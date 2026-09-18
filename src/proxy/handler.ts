@@ -8,7 +8,9 @@ import type {
 } from "../types/index.js";
 import {
   ERR_DEFINITE_REVERT,
+  ERR_UNSIGNED_SEND_REFUSED,
   SEND_METHODS,
+  UNSIGNED_SEND_METHODS,
 } from "../types/index.js";
 import { forwardRaw } from "../sim/rpcClient.js";
 import { simulateRawTransaction } from "../sim/simulator.js";
@@ -100,6 +102,26 @@ export async function handleRequest(
       error: {
         code: -32000,
         message: err instanceof Error ? err.message : String(err),
+      },
+    };
+  }
+
+  // Never accept unsigned sends — proxy has no keys and must not imply custody
+  if (UNSIGNED_SEND_METHODS.has(req.method)) {
+    return {
+      jsonrpc: "2.0",
+      id: req.id,
+      error: {
+        code: ERR_UNSIGNED_SEND_REFUSED,
+        message:
+          "L2 Send Guard: eth_sendTransaction refused — no key custody. Sign externally and submit via eth_sendRawTransaction.",
+        data: {
+          l2SendGuard: true,
+          refused: true,
+          code: "UNSIGNED_SEND_REFUSED",
+          useMethod: "eth_sendRawTransaction",
+          hint: "Point your JSON-RPC URL at this proxy; keep signing in your wallet/agent. See docs/AGENTS.md.",
+        },
       },
     };
   }

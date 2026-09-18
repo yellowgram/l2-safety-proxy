@@ -25,7 +25,7 @@ Health check:
 curl -s http://127.0.0.1:8545/health | jq .
 ```
 
-Expected: `chains` includes `arb-sepolia` and `base-sepolia`, `failOpen: true`.
+Expected: `chains` includes `arb-sepolia`, `op-sepolia`, and `base-sepolia`, `failOpen: true`.
 
 ## 3. Pass-through smoke (public RPC)
 
@@ -37,6 +37,11 @@ curl -s http://127.0.0.1:8545 -H 'content-type: application/json' \
 # Base Sepolia via header
 curl -s http://127.0.0.1:8545 -H 'content-type: application/json' \
   -H 'x-l2sg-chain: base-sepolia' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
+
+# OP Sepolia via header
+curl -s http://127.0.0.1:8545 -H 'content-type: application/json' \
+  -H 'x-l2sg-chain: op-sepolia' \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
 ```
 

@@ -12,7 +12,7 @@ ENV NODE_ENV=production \
     L2SG_HOST=0.0.0.0 \
     L2SG_PORT=8545 \
     L2SG_FAIL_OPEN=true \
-    L2SG_CHAINS=arb-sepolia,base-sepolia \
+    L2SG_CHAINS=arb-sepolia,op-sepolia,base-sepolia \
     L2SG_DEFAULT_CHAIN=arb-sepolia
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev

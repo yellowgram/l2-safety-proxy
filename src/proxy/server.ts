@@ -11,8 +11,19 @@ export function createServer(config: GuardConfig): http.Server {
           ok: true,
           service: "l2-send-guard",
           chains: Object.keys(config.chains),
+          chainDetails: Object.values(config.chains).map((c) => ({
+            id: c.id,
+            name: c.name,
+            chainId: c.chainId,
+            ecosystem: c.ecosystem,
+          })),
           defaultChain: config.defaultChain,
           failOpen: config.failOpen,
+          submit: {
+            accepted: ["eth_sendRawTransaction", "eth_sendRawTransactionSync"],
+            refused: ["eth_sendTransaction"],
+            note: "Sign externally; proxy never holds keys. See docs/AGENTS.md.",
+          },
         })
       );
       return;

@@ -4,7 +4,7 @@
 
 > Not another RPC cloud. Not an indexer. Not key custody. Not an OP-only clone of OP Security Proxy.
 
-**Ecosystems (day one):** Arbitrum Sepolia + Base Sepolia (OP Stack template included).
+**Ecosystems (day one):** Arbitrum Sepolia + **OP Sepolia** + Base Sepolia (all first-class).
 
 ## Quick start (<10 min)
 
@@ -17,7 +17,7 @@ cp .env.example .env               # optional; public RPCs work out of the box
 npm start                          # http://127.0.0.1:8545
 ```
 
-Point your app’s RPC URL at the proxy. Select chain with header `x-l2sg-chain: arb-sepolia` or `base-sepolia`.
+Point your app’s RPC URL at the proxy. Select chain with header `x-l2sg-chain: arb-sepolia` | `op-sepolia` | `base-sepolia`.
 
 ```bash
 curl -s http://127.0.0.1:8545/health
@@ -45,7 +45,7 @@ See [.env.example](./.env.example).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `L2SG_CHAINS` | `arb-sepolia,base-sepolia` | Enabled chains |
+| `L2SG_CHAINS` | `arb-sepolia,op-sepolia,base-sepolia` | Enabled chains |
 | `L2SG_DEFAULT_CHAIN` | first in list | Default when no header |
 | `L2SG_FAIL_OPEN` | `true` | Forward on uncertainty |
 | `L2SG_RPC_ARB_SEPOLIA` | public Arb Sepolia | Upstream URL |
@@ -63,6 +63,10 @@ See [.env.example](./.env.example).
 | `npm run dev` | Run via `tsx` (no build) |
 | `npm run bench` | Mocked latency: raw send vs guarded send (see [BENCH.md](./BENCH.md)) |
 
+
+## Agent submit paths
+
+Point agents at the proxy JSON-RPC URL. **Accepted:** `eth_sendRawTransaction` (simulated). **Refused:** `eth_sendTransaction` (`-32081` — no key custody; sign externally). Other methods forward. Details: [docs/AGENTS.md](./docs/AGENTS.md).
 
 ## Client SDK (wallets / agents)
 
@@ -87,7 +91,7 @@ Future grant readiness checklist (do not apply yet): [docs/AF_TRACTION_PREP.md](
 
 ## Differentiation
 
-- **vs OP Security Proxy:** multi-ecosystem (Arb + OP/Base), `eth_simulateV1` preference, confidence flags, TS middleware — not local-OP-only revm.
+- **vs OP Security Proxy:** multi-ecosystem (Arb + OP Sepolia + Base), `eth_simulateV1` preference, confidence flags, TS middleware — not local-OP-only revm.
 - **vs Tenderly:** thin fail-open RPC drop-in, not a full DevOps suite.
 - **vs eRPC:** complementary safety layer in front of reliability proxies.
 

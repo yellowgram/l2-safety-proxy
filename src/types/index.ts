@@ -81,5 +81,16 @@ export const SEND_METHODS = new Set([
   "eth_sendRawTransactionSync",
 ]);
 
+/**
+ * Unsigned send methods — refused (no key custody).
+ * Agents/wallets must sign externally and use eth_sendRawTransaction.
+ */
+export const UNSIGNED_SEND_METHODS = new Set([
+  "eth_sendTransaction",
+]);
+
 /** Custom error code: definite revert blocked by L2 Send Guard */
 export const ERR_DEFINITE_REVERT = -32080;
+
+/** Custom error code: unsigned send refused (use raw + external signer) */
+export const ERR_UNSIGNED_SEND_REFUSED = -32081;
