@@ -19,11 +19,18 @@ function boolEnv(key: string, fallback: boolean): boolean {
 function buildChain(key: string): ChainConfig | null {
   const tmpl = CHAIN_TEMPLATES[key];
   if (!tmpl) return null;
-  const urlKey = `L2SG_RPC_${key.toUpperCase().replace(/-/g, "_")}`;
+  const slug = key.toUpperCase().replace(/-/g, "_");
+  const urlKey = `L2SG_RPC_${slug}`;
+  const fallbackKey = `L2SG_RPC_FALLBACK_${slug}`;
   const upstreamRpcUrl =
     env(urlKey) ?? PUBLIC_RPC_DEFAULTS[key] ?? "";
   if (!upstreamRpcUrl) return null;
-  return { ...tmpl, upstreamRpcUrl };
+  const fallbackRpcUrl = env(fallbackKey);
+  return {
+    ...tmpl,
+    upstreamRpcUrl,
+    ...(fallbackRpcUrl ? { fallbackRpcUrl } : {}),
+  };
 }
 
 /**

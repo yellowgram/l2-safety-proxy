@@ -37,7 +37,7 @@ docker compose up --build
 | Success | `definite` | Forward to upstream |
 | Unsupported method / network / parse error | `uncertain` | **Fail-open** — forward to upstream |
 
-Prefer **`eth_simulateV1`** when the node supports it; fall back to **`eth_call`**. See [ARCHITECTURE.md](./ARCHITECTURE.md).
+Prefer **`eth_simulateV1`** when the node supports it; on `-32601`/`-32602` (unsupported / invalid params) fall back to **`eth_call` before fail-open**, and cache that upstream as V1-unsupported for the process lifetime. See [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Config (env)
 
@@ -51,6 +51,7 @@ See [.env.example](./.env.example).
 | `L2SG_RPC_ARB_SEPOLIA` | public Arb Sepolia | Upstream URL |
 | `L2SG_RPC_BASE_SEPOLIA` | public Base Sepolia | Upstream URL |
 | `L2SG_RPC_OP_SEPOLIA` | public OP Sepolia | Upstream URL |
+| `L2SG_RPC_FALLBACK_*` | (unset) | Optional alternate RPC for simulation only |
 
 ## Scripts
 

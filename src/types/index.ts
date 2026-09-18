@@ -33,6 +33,12 @@ export interface ChainConfig {
   chainId: number;
   /** Upstream JSON-RPC URL (user's existing RPC — we sit in front) */
   upstreamRpcUrl: string;
+  /**
+   * Optional alternate RPC used only for simulation when primary eth_call
+   * is uncertain (e.g. a node that supports eth_simulateV1 / richer eth_call).
+   * Send forwarding always uses upstreamRpcUrl.
+   */
+  fallbackRpcUrl?: string;
   /** Prefer eth_simulateV1 when the node advertises it */
   preferSimulateV1: boolean;
   /** Ecosystem tag for multi-L2 differentiation */

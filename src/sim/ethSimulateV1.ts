@@ -5,12 +5,29 @@ import { decodeRevertData, extractRevertHex } from "../decode/revert.js";
 import type { SimResult } from "../types/index.js";
 
 /**
+ * True when the upstream rejects eth_simulateV1 as unavailable/unsupported
+ * for our request shape. Includes:
+ *   -32601 method not found
+ *   -32602 invalid params (seen on Base Sepolia public RPC for our V1 shape)
+ * plus common message patterns.
+ */
+export function isSimulateV1UnsupportedError(err: unknown): boolean {
+  const code = (err as { code?: number })?.code;
+  if (code === -32601 || code === -32602) return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /method not found|not supported|does not exist|invalid params|-32601|-32602|unknown method|method unavailable/i.test(
+    msg
+  );
+}
+
+/**
  * Prefer eth_simulateV1 (EIP-simulation / Flashblocks-aware on Base).
  * Spec shape (pragmatic subset):
  *   eth_simulateV1([{ blockStateCalls: [{ calls: [{ from, to, data, value, gas }] }],
  *                     traceTransfers: false, validation: true }], "latest")
  *
- * Returns null if method is unsupported so caller can fall back.
+ * Returns null if method is unsupported so caller can fall back to eth_call
+ * and mark the upstream in the capability cache.
  */
 export async function simulateV1(
   call: RpcCaller,
@@ -40,15 +57,11 @@ export async function simulateV1(
     const result = (await call("eth_simulateV1", params)) as unknown;
     return interpretSimulateV1(result);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    // Method not found / unsupported → signal fallback
-    if (
-      /method not found|not supported|does not exist|-32601/i.test(msg) ||
-      (err as { code?: number }).code === -32601
-    ) {
+    // Unsupported / invalid params for our shape → signal eth_call fallback
+    if (isSimulateV1UnsupportedError(err)) {
       return null;
     }
-    // Other errors: treat as sim failure (uncertain)
+    // Other errors: treat as sim failure (uncertain) unless definite revert data
     const hex = extractRevertHex(err);
     if (hex) {
       const decoded = decodeRevertData(hex);
@@ -61,6 +74,7 @@ export async function simulateV1(
         code: "DEFINITE_REVERT",
       };
     }
+    const msg = err instanceof Error ? err.message : String(err);
     return {
       ok: false,
       method: "eth_simulateV1",

@@ -48,8 +48,10 @@ Wallet / bot / agent
 ## Simulation strategy
 
 1. **Prefer `eth_simulateV1`** when `preferSimulateV1` is true for the chain (Base Flashblocks-aware nodes, and any geth/OP build that advertises it).
-2. If the method is unsupported (`-32601` / “method not found”) → **fallback to `eth_call`** with recovered `from` at `latest`.
-3. Decode `Error(string)` / `Panic(uint256)` / custom selectors for human-readable reasons.
+2. If the method is **unsupported or unavailable for our request shape** — JSON-RPC `-32601` (method not found) **or** `-32602` (invalid params, observed on Base Sepolia public RPC) — **fallback to `eth_call`** with recovered `from` at `latest` **before** any fail-open forward.
+3. **Per-upstream capability cache (process lifetime):** after `-32601`/`-32602` (or equivalent message) for `eth_simulateV1`, that upstream URL skips V1 for the rest of the process and goes straight to `eth_call`.
+4. **Optional `L2SG_RPC_FALLBACK_<CHAIN>`:** if primary `eth_call` is still uncertain, retry simulation against the alternate RPC (sends still forward to the primary upstream).
+5. Decode `Error(string)` / `Panic(uint256)` / custom selectors for human-readable reasons. Confidence stays `definite` only on clear revert/success; unsupported V1 alone never fail-opens without trying `eth_call`.
 
 No local revm dependency in M1 (KISS TypeScript). A future M2 may add an optional local engine for offline CI.
 

@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
+import { clearSimulateV1CapabilityCache } from "../src/sim/capabilityCache.js";
 import type { ChainConfig, SimResult } from "../src/types/index.js";
 import { simulateRawTransaction } from "../src/sim/simulator.js";
 import { encodeErrorResult } from "viem";
@@ -15,6 +16,10 @@ const chain: ChainConfig = {
 };
 
 describe("confidence classification via simulator deps", () => {
+  beforeEach(() => {
+    clearSimulateV1CapabilityCache();
+  });
+
   it("marks eth_call revert with data as definite", async () => {
     const revertData = encodeErrorResult({
       abi: COMMON_ERRORS_ABI,

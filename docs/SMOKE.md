@@ -41,6 +41,7 @@ The `eth_sendRawTransaction` guard attempt reached the simulation path, but Base
 ## Limitations / follow-up
 
 - Public RPC behavior and rate limits can change. This run saw no rate limiting.
-- The Base Sepolia endpoint's current `eth_simulateV1` parameter behavior is incompatible with the proxy's expected request shape, so this live run did not produce the intended `-32080` definite-revert guard response.
-- The unit and mocked integration tests cover the definite-revert abort branch; a future live check should be repeated after upstream `eth_simulateV1` compatibility is resolved (or with an endpoint that supports the expected shape).
+- **Finding (Base Sepolia public RPC):** `eth_simulateV1` returned **`-32602 Invalid params`** for the proxy's request shape. On that smoke run the guard classified the V1 error as uncertain and fail-opened without trying `eth_call` first — so the definite-revert abort (`-32080`) did not fire even though a control `eth_call` clearly reverted.
+- **Hardening (post-smoke):** unsupported / invalid-params V1 (`-32601` / `-32602`) now **falls back to `eth_call` before fail-open**; the upstream is **capability-cached** so subsequent sends skip V1 for the process lifetime; optional `L2SG_RPC_FALLBACK_*` can supply an alternate sim RPC. Unit/mocked tests cover: unsupported V1 → eth_call definite revert → abort; unsupported V1 + eth_call fail → fail-open.
+- A future live smoke on Base Sepolia should re-check the guarded send path and expect `-32080` when `eth_call` sees a definite revert (even if V1 remains `-32602`).
 - The smoke used only read calls and a deliberately unfunded, zero-value simulation request; no private key was stored or committed and no mainnet value transfer was attempted.
