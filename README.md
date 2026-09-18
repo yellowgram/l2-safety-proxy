@@ -88,6 +88,7 @@ Full examples (viem + ethers v6): [src/sdk/README.md](./src/sdk/README.md). Late
 Step-by-step public-testnet demo (no secrets): [docs/DEMO.md](./docs/DEMO.md).
 
 Future grant readiness checklist (do not apply yet): [docs/AF_TRACTION_PREP.md](./docs/AF_TRACTION_PREP.md).
+Soft WTP problem brief (later; no outreach): [docs/SOFT_WTP.md](./docs/SOFT_WTP.md).
 
 ## Differentiation
 
