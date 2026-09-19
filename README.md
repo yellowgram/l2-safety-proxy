@@ -1,7 +1,7 @@
 # L2 Send Guard
 
-[![CI](https://github.com/yellowgram/l2-safety-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/yellowgram/l2-safety-proxy/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-public-brightgreen)](https://github.com/yellowgram/l2-safety-proxy)
 **Public OSS** — `git clone https://github.com/yellowgram/l2-safety-proxy.git`
 
 
