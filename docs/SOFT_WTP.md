@@ -1,6 +1,6 @@
 # Soft WTP brief (later; no outreach)
 
-**Status: internal planning only.** This is a one-page problem brief for a later, founder-approved soft-pitch process—not a customer list, sales script, grant application, or evidence of demand.
+**Status: CoS authorized ≤5 soft WTP 2026-09-19; still no spam/DMs abuse; drafts only until send step.** Problem brief + [draft targets](./drafts/SOFT_WTP_TARGETS.md) — not a customer list, sales script, grant application, or evidence of demand. Do **not** send external messages from this doc alone.
 
 ## Problem
 
@@ -35,4 +35,4 @@ Do not build a hosted SaaS tier or apply to the Arbitrum Foundation before the r
 
 ## Outreach guardrail
 
-**Do not contact anyone from this document alone.** The founder/CoS decide whether outreach happens, who may be contacted, and when. Until that decision, this document supports product/demo preparation only. No capital deployment, grant application, or outreach is authorized by this brief.
+**Do not contact anyone from this document or from [SOFT_WTP_TARGETS.md](./drafts/SOFT_WTP_TARGETS.md) alone.** CoS authorized draft prep (≤5) on 2026-09-19; **send step is separate**. No spam, no DM abuse, no early AF apply, ₹0. No capital deployment or grant application is authorized by this brief.

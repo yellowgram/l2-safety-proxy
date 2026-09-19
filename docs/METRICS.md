@@ -20,8 +20,7 @@ Raw exports (optional CSV/JSON) go in [`docs/metrics/`](./metrics/) — keep fil
 
 | Week (ET) | Users/teams | Sims | Definite aborts | Fail-opens | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 2026-09-15 | 0 | 0 | 0 | 0 | Template seeded; offline demo + docs ship. No external users yet. |
-| YYYY-MM-DD |  |  |  |  |  |
+| 2026-09-15 | 0 | 0 | 0 | 0 | CoS GO 2026-09-19: CI + GFI issues + soft-WTP drafts; offline demo verified. No external users yet. |
 
 ## Export schema (optional)
 
