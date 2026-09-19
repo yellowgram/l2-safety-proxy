@@ -1,5 +1,10 @@
 # L2 Send Guard
 
+[![CI](https://github.com/yellowgram/l2-safety-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/yellowgram/l2-safety-proxy/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+**Public OSS** — `git clone https://github.com/yellowgram/l2-safety-proxy.git`
+
+
 **Multi-L2 pre-broadcast safety middleware** for wallets, agents, and Orbit/OP operators.
 
 Drop-in JSON-RPC proxy in front of your existing RPC: simulate `eth_sendRawTransaction`, **abort definite reverts** with decoded errors, and **fail-open** when uncertain. Not an RPC cloud. Not an indexer. **No key custody.**
