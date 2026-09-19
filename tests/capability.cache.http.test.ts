@@ -131,6 +131,7 @@ describe("capability-cache HTTP path", () => {
     const config: GuardConfig = {
       listenHost: "127.0.0.1",
       listenPort: 0,
+      guardMode: "open",
       failOpen: true,
       defaultChain: "base-sepolia",
       chains: {

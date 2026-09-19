@@ -1,5 +1,15 @@
 # Sepolia live smoke
 
+## Arb Sepolia definite-abort — 2026-09-19 ~09:07 ET
+
+**Result:** PASS abort via `eth_call` after Arb public RPC rejects `eth_simulateV1` shape (`cannot unmarshal … simOpts`); capability-cache marks V1 unsupported. Forward broadcast slice **stopped** — faucets blocked (triangle 503; HTML-only drips). No invented hashes.
+
+Reproduce: `npm run demo:sepolia` (see also `docs/SEND_LOG.md`).
+
+---
+
+# Sepolia live smoke
+
 ## Re-smoke (capability-cache) — 2026-09-18 22:49 EDT
 
 **Result:** PASS — guarded send on Base Sepolia now aborts definite reverts via `eth_call` after unsupported `eth_simulateV1`, and the process-lifetime capability cache skips V1 on subsequent sends.

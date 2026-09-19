@@ -6,6 +6,7 @@ import { ERR_UNSIGNED_SEND_REFUSED } from "../src/types/index.js";
 const config = (): GuardConfig => ({
   listenHost: "127.0.0.1",
   listenPort: 8545,
+  guardMode: "open",
   failOpen: true,
   defaultChain: "op-sepolia",
   chains: {

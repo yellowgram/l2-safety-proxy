@@ -15,7 +15,9 @@ export function isSimulateV1UnsupportedError(err: unknown): boolean {
   const code = (err as { code?: number })?.code;
   if (code === -32601 || code === -32602) return true;
   const msg = err instanceof Error ? err.message : String(err);
-  return /method not found|not supported|does not exist|invalid params|-32601|-32602|unknown method|method unavailable/i.test(
+  // Arb Sepolia (nitro) returns -32000 + Go unmarshal error for our V1 params shape;
+  // treat as unsupported so we fall through to eth_call + capability-cache.
+  return /method not found|not supported|does not exist|invalid params|-32601|-32602|unknown method|method unavailable|cannot unmarshal|simOpts|unmarshal array/i.test(
     msg
   );
 }

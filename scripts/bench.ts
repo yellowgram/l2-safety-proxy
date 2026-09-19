@@ -172,6 +172,7 @@ async function main() {
   const callProxy = createServer({
     listenHost: "127.0.0.1",
     listenPort: 0,
+    guardMode: "open",
     failOpen: true,
     defaultChain: "arb-sepolia",
     chains: {
@@ -211,6 +212,7 @@ async function main() {
   const v1Proxy = createServer({
     listenHost: "127.0.0.1",
     listenPort: 0,
+    guardMode: "open",
     failOpen: true,
     defaultChain: "base-sepolia",
     chains: {

@@ -41,14 +41,17 @@ Wallet / bot / agent
 | Node returns standard revert data / status=0 from sim | `definite` | **Abort** — return decoded error |
 | Sim succeeds | `definite` | Forward send |
 | Method missing, HTTP/network error, unparseable tx, unexpected shape | `uncertain` | **Fail-open** forward |
-| `L2SG_FAIL_OPEN=false` | any uncertain | Surface error instead of forward |
+| `GUARD_MODE=open` (default) / legacy `L2SG_FAIL_OPEN=true` | uncertain | **fail_open** forward |
+| `GUARD_MODE=strict` / legacy `L2SG_FAIL_OPEN=false` | uncertain / missing / unknown | **abort** (`-32082`) |
+
+Response metadata on every send decision: `decision`, `confidence` (`simulate_v1`\|`eth_call`\|`unknown`), `certainty`, `chainId`, `decoded` when present.
 
 **Ethics:** default fail-open so middleware lag or node quirks never brick operators. Simulation is advisory relative to on-chain truth; confidence flags make that explicit.
 
 ## Simulation strategy
 
 1. **Prefer `eth_simulateV1`** when `preferSimulateV1` is true for the chain (Base Flashblocks-aware nodes, and any geth/OP build that advertises it).
-2. If the method is **unsupported or unavailable for our request shape** — JSON-RPC `-32601` (method not found) **or** `-32602` (invalid params, observed on Base Sepolia public RPC) — **fallback to `eth_call`** with recovered `from` at `latest` **before** any fail-open forward.
+2. If the method is **unsupported or unavailable for our request shape** — JSON-RPC `-32601` / `-32602`, **or** Arb Nitro Go unmarshal/`simOpts` shape rejects (`-32000`) — **fallback to `eth_call`** with recovered `from` at `latest` **before** any fail-open forward.
 3. **Per-upstream capability cache (process lifetime):** after `-32601`/`-32602` (or equivalent message) for `eth_simulateV1`, that upstream URL skips V1 for the rest of the process and goes straight to `eth_call`.
 4. **Optional `L2SG_RPC_FALLBACK_<CHAIN>`:** if primary `eth_call` is still uncertain, retry simulation against the alternate RPC (sends still forward to the primary upstream).
 5. Decode `Error(string)` / `Panic(uint256)` / custom selectors for human-readable reasons. Confidence stays `definite` only on clear revert/success; unsupported V1 alone never fail-opens without trying `eth_call`.

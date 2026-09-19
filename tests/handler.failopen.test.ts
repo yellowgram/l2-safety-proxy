@@ -7,6 +7,7 @@ import { FAKE_RAW as RAW } from "./fixtures.js";
 const baseConfig = (): GuardConfig => ({
   listenHost: "127.0.0.1",
   listenPort: 8545,
+  guardMode: "open",
   failOpen: true,
   defaultChain: "arb-sepolia",
   chains: {
@@ -53,7 +54,10 @@ describe("handleRequest fail-open / abort", () => {
     expect(forward).not.toHaveBeenCalled();
     expect(res.error?.code).toBe(ERR_DEFINITE_REVERT);
     expect(res.error?.data).toMatchObject({
-      confidence: "definite",
+      decision: "abort",
+      confidence: "eth_call",
+      certainty: "definite",
+      chainId: 421614,
       aborted: true,
       reason: "insufficient balance",
     });
@@ -148,6 +152,7 @@ describe("handleRequest fail-open / abort", () => {
 
   it("when failOpen=false, surfaces uncertain errors instead of forwarding", async () => {
     const cfg = baseConfig();
+    cfg.guardMode = "strict";
     cfg.failOpen = false;
     const forward = vi.fn();
     const simulate = async (): Promise<SimResult> => ({
@@ -169,7 +174,13 @@ describe("handleRequest fail-open / abort", () => {
       { simulate, forward }
     );
     expect(forward).not.toHaveBeenCalled();
-    expect(res.error?.message).toMatch(/SIM_FAILURE/);
+    expect(res.error?.data).toMatchObject({
+      decision: "abort",
+      confidence: "unknown",
+      certainty: "uncertain",
+      code: "SIM_FAILURE",
+      aborted: true,
+    });
   });
 
   it("forwards successful simulation", async () => {

@@ -18,12 +18,14 @@ export function createServer(config: GuardConfig): http.Server {
             ecosystem: c.ecosystem,
           })),
           defaultChain: config.defaultChain,
+          guardMode: config.guardMode,
           failOpen: config.failOpen,
           submit: {
             accepted: ["eth_sendRawTransaction", "eth_sendRawTransactionSync"],
             refused: ["eth_sendTransaction"],
             note: "Sign externally; proxy never holds keys. See docs/AGENTS.md.",
           },
+          confidence: ["simulate_v1", "eth_call", "unknown"],
         })
       );
       return;
@@ -91,7 +93,7 @@ export function listen(config: GuardConfig): http.Server {
       `[l2-send-guard] chains: ${Object.keys(config.chains).join(", ")} (default=${config.defaultChain})`
     );
     console.log(
-      `[l2-send-guard] fail-open=${config.failOpen} | no private-key custody`
+      `[l2-send-guard] GUARD_MODE=${config.guardMode} (fail-open=${config.failOpen}) | no private-key custody`
     );
   });
   return server;

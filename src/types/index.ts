@@ -1,23 +1,38 @@
-/** Confidence that a simulation result reflects on-chain truth. */
-export type Confidence = "definite" | "uncertain";
+/** Certainty that a simulation result reflects on-chain truth. */
+export type Certainty = "definite" | "uncertain";
 
-/** How the simulation was performed. */
+/** @deprecated Use Certainty — kept as alias for older imports. */
+export type Confidence = Certainty;
+
+/**
+ * Provenance of the simulation used for a send decision.
+ * Surface name in abort / fail_open / forward responses.
+ */
+export type MethodConfidence = "simulate_v1" | "eth_call" | "unknown";
+
+/** How the simulation was performed (internal). */
 export type SimMethod =
   | "eth_simulateV1"
   | "eth_call"
   | "unavailable";
 
+/** Guard policy: open = fail-open on uncertain; strict = abort on uncertain. */
+export type GuardMode = "open" | "strict";
+
+/** Decision taken by the guard for a send. */
+export type GuardDecision = "abort" | "fail_open" | "forward";
+
 export interface SimSuccess {
   ok: true;
   method: SimMethod;
-  confidence: Confidence;
+  confidence: Certainty;
   gasUsed?: bigint;
 }
 
 export interface SimRevert {
   ok: false;
   method: SimMethod;
-  confidence: Confidence;
+  confidence: Certainty;
   reason: string;
   rawData?: `0x${string}`;
   gasUsed?: bigint;
@@ -51,8 +66,36 @@ export interface GuardConfig {
   chains: Record<string, ChainConfig>;
   /** Default chain key when request has no x-l2sg-chain header */
   defaultChain: string;
-  /** Fail-open: forward send when sim is uncertain or fails */
+  /**
+   * open = fail-open on uncertain (default);
+   * strict = abort when sim missing / unknown / low-confidence.
+   */
+  guardMode: GuardMode;
+  /** Derived: true iff guardMode === "open". Kept for callers/tests. */
   failOpen: boolean;
+}
+
+/** Guard metadata attached to every send abort / fail_open / forward. */
+export interface GuardResponseMeta {
+  l2SendGuard: true;
+  decision: GuardDecision;
+  /** Simulation method provenance */
+  confidence: MethodConfidence;
+  /** definite | uncertain */
+  certainty: Certainty;
+  chainId: number;
+  simMethod: SimMethod;
+  /** Present when a revert was decoded */
+  decoded?: {
+    reason: string;
+    kind?: string;
+    selector?: string;
+  };
+  reason?: string;
+  code?: string;
+  rawData?: `0x${string}`;
+  aborted?: boolean;
+  failOpen?: boolean;
 }
 
 export interface JsonRpcRequest {
@@ -73,6 +116,8 @@ export interface JsonRpcResponse {
   id: string | number | null;
   result?: unknown;
   error?: JsonRpcError;
+  /** Non-standard extension: send-guard metadata on forward / fail_open success */
+  l2sg?: GuardResponseMeta;
 }
 
 /** Methods that submit signed txs — intercepted for simulation. */
@@ -94,3 +139,13 @@ export const ERR_DEFINITE_REVERT = -32080;
 
 /** Custom error code: unsigned send refused (use raw + external signer) */
 export const ERR_UNSIGNED_SEND_REFUSED = -32081;
+
+/** Custom error code: strict-mode abort on uncertain / missing sim */
+export const ERR_STRICT_UNCERTAIN = -32082;
+
+/** Map internal SimMethod → response confidence provenance. */
+export function methodConfidence(method: SimMethod): MethodConfidence {
+  if (method === "eth_simulateV1") return "simulate_v1";
+  if (method === "eth_call") return "eth_call";
+  return "unknown";
+}
