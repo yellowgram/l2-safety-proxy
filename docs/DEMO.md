@@ -1,66 +1,152 @@
-# Demo — local against public testnets (no secrets)
+# Public demo — Sepolia (Arb / Base / OP), no secrets required
 
-This demo uses **public** Sepolia RPCs. Do not commit API keys. Copy `.env.example` → `.env` only if you override URLs.
+Integrator walkthrough for **L2 Send Guard**: run the proxy against **public** Arbitrum Sepolia, Base Sepolia, and OP Sepolia RPCs, then prove **definite-revert abort** and **fail-open**.
 
-## 1. Install & test
+| Constraint | Status |
+| --- | --- |
+| API keys | Not required (public RPCs) |
+| Capital / funded wallet | Not required for abort + fail-open demos |
+| Private keys in repo / `.env` | Never — ephemeral or offline fixtures only |
+| Mainnet | Out of scope |
+
+> Simulation is not on-chain truth. Always read `confidence` / `aborted` on error payloads.
+
+---
+
+## Path A — npm (recommended first)
+
+### 1. Install, test, build
 
 ```bash
-cd /workspace/blockchain/prototype   # or your clone root
+git clone https://github.com/yellowgram/l2-safety-proxy.git
+cd l2-safety-proxy          # package root (this directory)
 npm install
-npm test
+npm test                    # must pass
 npm run build
 ```
 
-## 2. Run the proxy
+Optional env (public defaults already work):
 
 ```bash
-cp .env.example .env   # optional
+cp .env.example .env        # do not put keys or mnemonics here
+# Defaults:
+#   L2SG_RPC_ARB_SEPOLIA  → https://sepolia-rollup.arbitrum.io/rpc
+#   L2SG_RPC_BASE_SEPOLIA → https://sepolia.base.org
+#   L2SG_RPC_OP_SEPOLIA   → https://sepolia.optimism.io
+```
+
+### 2. Start the proxy
+
+```bash
 npm start
 # → http://127.0.0.1:8545
 ```
 
-Health check:
+Health (expect all three chains + `failOpen: true`):
 
 ```bash
 curl -s http://127.0.0.1:8545/health | jq .
 ```
 
-Expected: `chains` includes `arb-sepolia`, `op-sepolia`, and `base-sepolia`, `failOpen: true`.
-
-## 3. Pass-through smoke (public RPC)
+### 3. Pass-through smoke (public RPCs, read-only)
 
 ```bash
-# Default chain = arb-sepolia
+# Default chain = arb-sepolia (421614 / 0x66eee)
 curl -s http://127.0.0.1:8545 -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
 
-# Base Sepolia via header
+# Base Sepolia (84532 / 0x14a34)
 curl -s http://127.0.0.1:8545 -H 'content-type: application/json' \
   -H 'x-l2sg-chain: base-sepolia' \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
 
-# OP Sepolia via header
+# OP Sepolia (11155420 / 0xaa37dc)
 curl -s http://127.0.0.1:8545 -H 'content-type: application/json' \
   -H 'x-l2sg-chain: op-sepolia' \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
 ```
 
-## 4. Send path (simulation)
+### 4. Offline proof: abort + fail-open (no network capital)
 
-Point your wallet / viem / ethers **HTTP RPC URL** at `http://127.0.0.1:8545`.
-
-- Broadcasts still use **your** signed txs (guard never sees keys).
-- If simulation reports a **definite** revert, you get JSON-RPC error **`-32080`** with `data.l2SendGuard`, `confidence`, and decoded `reason` — tx is **not** forwarded.
-- If simulation is uncertain, the tx is **forwarded** (fail-open).
-
-Docker alternative:
+Best first proof — **no public RPC, no keys, no broadcast**:
 
 ```bash
-docker compose up --build
+npm run build
+node scripts/demo-offline.mjs
 ```
 
-## 5. What not to do
+Expected summary:
 
-- Do not put private keys or mnemonic in `.env`
+```text
+definite-revert abort: PASS   # JSON-RPC -32080, aborted:true, upstream sends: 0
+fail-open forward:     PASS   # result hash returned, upstream sends: 1
+```
+
+### 5. Live Sepolia: definite-revert abort (Base public RPC)
+
+Unfunded ephemeral key + known-reverting calldata against Base Sepolia USDC. The proxy aborts before broadcast (`-32080`). No capital required; key is generated in memory and discarded.
+
+```bash
+# with proxy NOT already bound on :8545 — script starts its own ephemeral listener
+node scripts/live-smoke-cache.mjs
+```
+
+Expect JSON-RPC **`-32080`**, `confidence: "definite"`, `aborted: true`, `simMethod: "eth_call"` (after `eth_simulateV1` unsupported on the public Base endpoint). See [SMOKE.md](./SMOKE.md) for dated results.
+
+### 6. Wire your app / SDK
+
+Point your HTTP RPC URL at `http://127.0.0.1:8545` and set `x-l2sg-chain`. Signing stays in your wallet — the guard only sees signed raw txs.
+
+- Agent submit rules: [AGENTS.md](./AGENTS.md)
+- viem / ethers helpers: [src/sdk/README.md](../src/sdk/README.md)
+
+---
+
+## Path B — Docker
+
+```bash
+git clone https://github.com/yellowgram/l2-safety-proxy.git
+cd l2-safety-proxy
+docker compose up --build
+# → http://127.0.0.1:8545  (L2SG_HOST=0.0.0.0 inside the container)
+```
+
+Then run the same health + `eth_chainId` curls from Path A §2–3 against `http://127.0.0.1:8545`.
+
+Offline abort/fail-open demo still uses npm (needs Node on the host):
+
+```bash
+npm install && npm run build && node scripts/demo-offline.mjs
+```
+
+Or exec into a Node sidecar; the compose file only ships the proxy service.
+
+---
+
+## What you should see
+
+| Scenario | Confidence | Proxy action | Integrator signal |
+| --- | --- | --- | --- |
+| Clear revert (decoded / `execution reverted`) | `definite` | **Abort** — do **not** forward | JSON-RPC **`-32080`**, `data.aborted: true`, `data.l2SendGuard: true` |
+| Sim success | `definite` | Forward `eth_sendRawTransaction` | Upstream result (tx hash) |
+| Unsupported method / network / parse / unclear | `uncertain` | **Fail-open** forward (default) | Upstream response; availability preserved |
+| `eth_sendTransaction` | n/a | **Refuse** | JSON-RPC **`-32081`** — no key custody |
+
+Default `L2SG_FAIL_OPEN=true`. Set `false` only if you explicitly want uncertain sims to surface as errors instead of forwarding.
+
+---
+
+## What not to do
+
+- Do not put private keys, mnemonics, or funded wallets in `.env`
 - Do not commit `.env`
 - Do not treat simulation as absolute on-chain truth — read `confidence`
+- Do not change GitHub visibility or publish secrets for a “public demo”
+- Do not apply for grants / AF from this demo alone — see [AF_TRACTION_PREP.md](./AF_TRACTION_PREP.md)
+
+## Related
+
+- Architecture & threat model: [ARCHITECTURE.md](../ARCHITECTURE.md)
+- Live smoke log: [SMOKE.md](./SMOKE.md)
+- Soft WTP brief (no outreach): [SOFT_WTP.md](./SOFT_WTP.md)
+- Agent traction plan: [TRACTION_PLAN.md](./TRACTION_PLAN.md)

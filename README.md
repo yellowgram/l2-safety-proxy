@@ -1,26 +1,31 @@
 # L2 Send Guard
 
-**Multi-L2 pre-broadcast safety middleware** — drop-in JSON-RPC proxy that sits in front of your existing RPC, simulates `eth_sendRawTransaction`, aborts **definite** reverts with decoded errors, and **fail-opens** when uncertain.
+**Multi-L2 pre-broadcast safety middleware** for wallets, agents, and Orbit/OP operators.
 
-> Not another RPC cloud. Not an indexer. Not key custody. Not an OP-only clone of OP Security Proxy.
+Drop-in JSON-RPC proxy in front of your existing RPC: simulate `eth_sendRawTransaction`, **abort definite reverts** with decoded errors, and **fail-open** when uncertain. Not an RPC cloud. Not an indexer. **No key custody.**
 
-**Ecosystems (day one):** Arbitrum Sepolia + **OP Sepolia** + Base Sepolia (all first-class).
+| | |
+| --- | --- |
+| **Chains (day one)** | Arbitrum Sepolia · OP Sepolia · Base Sepolia |
+| **Submit** | `eth_sendRawTransaction` (simulated) |
+| **Refuse** | `eth_sendTransaction` (`-32081`) — sign externally |
+| **License** | MIT |
 
-## Quick start (<10 min)
+---
+
+## 60-second start
 
 ```bash
-git clone <repo> && cd prototype   # project root
-npm install
-npm test                           # must pass
-npm run build
-cp .env.example .env               # optional; public RPCs work out of the box
+git clone https://github.com/yellowgram/l2-safety-proxy.git
+cd l2-safety-proxy
+npm install && npm test && npm run build
 npm start                          # http://127.0.0.1:8545
 ```
 
-Point your app’s RPC URL at the proxy. Select chain with header `x-l2sg-chain: arb-sepolia` | `op-sepolia` | `base-sepolia`.
-
 ```bash
 curl -s http://127.0.0.1:8545/health
+# Point your app RPC URL here. Select chain:
+#   header x-l2sg-chain: arb-sepolia | op-sepolia | base-sepolia
 ```
 
 Docker:
@@ -29,48 +34,45 @@ Docker:
 docker compose up --build
 ```
 
-## Behavior
+**Prove abort + fail-open offline (no keys, no capital):**
 
-| Simulation result | Confidence | Default action |
-| --- | --- | --- |
-| Revert with clear data/status | `definite` | **Abort** — JSON-RPC `-32080` + decoded reason |
-| Success | `definite` | Forward to upstream |
-| Unsupported method / network / parse error | `uncertain` | **Fail-open** — forward to upstream |
+```bash
+node scripts/demo-offline.mjs
+```
 
-Prefer **`eth_simulateV1`** when the node supports it; on `-32601`/`-32602` (unsupported / invalid params) fall back to **`eth_call` before fail-open**, and cache that upstream as V1-unsupported for the process lifetime. See [ARCHITECTURE.md](./ARCHITECTURE.md).
+Full Sepolia walkthrough (npm + Docker): **[docs/DEMO.md](./docs/DEMO.md)**.
 
-## Config (env)
+---
 
-See [.env.example](./.env.example).
+## Chain matrix
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `L2SG_CHAINS` | `arb-sepolia,op-sepolia,base-sepolia` | Enabled chains |
-| `L2SG_DEFAULT_CHAIN` | first in list | Default when no header |
-| `L2SG_FAIL_OPEN` | `true` | Forward on uncertainty |
-| `L2SG_RPC_ARB_SEPOLIA` | public Arb Sepolia | Upstream URL |
-| `L2SG_RPC_BASE_SEPOLIA` | public Base Sepolia | Upstream URL |
-| `L2SG_RPC_OP_SEPOLIA` | public OP Sepolia | Upstream URL |
-| `L2SG_RPC_FALLBACK_*` | (unset) | Optional alternate RPC for simulation only |
+| Key | Ecosystem | Chain ID | Default public RPC |
+| --- | --- | --- | --- |
+| `arb-sepolia` | Arbitrum | 421614 | `https://sepolia-rollup.arbitrum.io/rpc` |
+| `op-sepolia` | OP Stack | 11155420 | `https://sepolia.optimism.io` |
+| `base-sepolia` | Base (OP Stack) | 84532 | `https://sepolia.base.org` |
 
-## Scripts
+Override with `L2SG_RPC_*` / `L2SG_RPC_FALLBACK_*` (see [.env.example](./.env.example)). Production tip: point upstreams at the Alchemy / QuickNode / eRPC URL you already use — this middleware sits **in front**, it does not replace your RPC vendor.
 
-| Command | Purpose |
+---
+
+## Safety guarantees (honest)
+
+| Guarantee | Detail |
 | --- | --- |
-| `npm test` | Unit + mocked integration tests |
-| `npm run build` | Compile TypeScript → `dist/` |
-| `npm start` | Run proxy |
-| `npm run dev` | Run via `tsx` (no build) |
-| `npm run bench` | Mocked latency: raw send vs guarded send (see [BENCH.md](./BENCH.md)) |
+| **Fail-open** | Default `L2SG_FAIL_OPEN=true`. Uncertain / unsupported / network sim failures **forward** to upstream so availability is preserved. |
+| **Abort only when definite** | Clear revert → JSON-RPC **`-32080`** + decoded reason; raw tx is **not** broadcast. |
+| **No custody** | Proxy never holds keys or mnemonics. Only signed `eth_sendRawTransaction` is accepted; `eth_sendTransaction` is refused (`-32081`). |
+| **Not absolute truth** | Simulation ≠ finality. Always inspect `confidence` / `aborted` on error `data`. |
+| **Sim preference** | Prefer `eth_simulateV1`; on unsupported (`-32601`/`-32602`) fall back to `eth_call` **before** fail-open; capability-cache per upstream for process lifetime. |
 
+Details: [ARCHITECTURE.md](./ARCHITECTURE.md).
 
-## Agent submit paths
+---
 
-Point agents at the proxy JSON-RPC URL. **Accepted:** `eth_sendRawTransaction` (simulated). **Refused:** `eth_sendTransaction` (`-32081` — no key custody; sign externally). Other methods forward. Details: [docs/AGENTS.md](./docs/AGENTS.md).
+## Client SDK
 
-## Client SDK (wallets / agents)
-
-Thin helpers in `src/sdk/` wire viem or ethers v6 to the proxy URL + `x-l2sg-chain` header. **No key custody** — you keep signing locally.
+Thin helpers in `src/sdk/` wire **viem** or **ethers v6** to the proxy URL + `x-l2sg-chain`. Signing stays local.
 
 ```ts
 import { http } from "viem";
@@ -81,25 +83,58 @@ const transport = http(
 );
 ```
 
-Full examples (viem + ethers v6): [src/sdk/README.md](./src/sdk/README.md). Latency methodology: [BENCH.md](./BENCH.md).
+Full examples: **[src/sdk/README.md](./src/sdk/README.md)**. Agent submit rules: **[docs/AGENTS.md](./docs/AGENTS.md)**.
 
-## Demo
+---
 
-Step-by-step public-testnet demo (no secrets): [docs/DEMO.md](./docs/DEMO.md).
+## Behavior cheat-sheet
 
-Future grant readiness checklist (do not apply yet): [docs/AF_TRACTION_PREP.md](./docs/AF_TRACTION_PREP.md).
-Soft WTP problem brief (later; no outreach): [docs/SOFT_WTP.md](./docs/SOFT_WTP.md).
+| Simulation result | Confidence | Default action |
+| --- | --- | --- |
+| Revert with clear data/status | `definite` | **Abort** — `-32080` + decoded reason |
+| Success | `definite` | Forward to upstream |
+| Unsupported / network / parse error | `uncertain` | **Fail-open** — forward |
+
+---
+
+## Scripts
+
+| Command | Purpose |
+| --- | --- |
+| `npm test` | Unit + mocked integration |
+| `npm run build` | TypeScript → `dist/` |
+| `npm start` / `npm run dev` | Run proxy |
+| `npm run bench` | Mocked latency (see [BENCH.md](./BENCH.md)) |
+| `node scripts/demo-offline.mjs` | Offline abort + fail-open proof |
+| `node scripts/live-smoke-cache.mjs` | Live Base Sepolia definite-abort smoke |
+
+---
+
+## Docs map (integrators)
+
+| Doc | Why open it |
+| --- | --- |
+| **[docs/DEMO.md](./docs/DEMO.md)** | Public Sepolia demo — npm + Docker, abort + fail-open |
+| **[docs/AGENTS.md](./docs/AGENTS.md)** | Bot / agent submit paths (accepted vs refused) |
+| **[docs/AF_TRACTION_PREP.md](./docs/AF_TRACTION_PREP.md)** | Future AF readiness checklist — **do not apply yet** |
+| **[docs/SOFT_WTP.md](./docs/SOFT_WTP.md)** | Soft WTP problem brief — **no outreach** |
+| **[docs/TRACTION_PLAN.md](./docs/TRACTION_PLAN.md)** | Weekly agent-runnable traction (no founder intros / no grant apply) |
+| **[docs/METRICS.md](./docs/METRICS.md)** | Weekly users/sims template for CoS |
+| [docs/SMOKE.md](./docs/SMOKE.md) | Dated live smoke log |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Request flow, confidence, threat model |
+
+---
 
 ## Differentiation
 
-- **vs OP Security Proxy:** multi-ecosystem (Arb + OP Sepolia + Base), `eth_simulateV1` preference, confidence flags, TS middleware — not local-OP-only revm.
+- **vs OP Security Proxy:** multi-ecosystem (Arb + OP + Base), `eth_simulateV1` preference, confidence flags, TS middleware — not local-OP-only revm.
 - **vs Tenderly:** thin fail-open RPC drop-in, not a full DevOps suite.
 - **vs eRPC:** complementary safety layer in front of reliability proxies.
+
+## Out of scope
+
+Hosted SaaS, billing, indexing, MEV, tokens, private-key custody, unsolicited outreach, grant applications from this repo alone.
 
 ## License
 
 MIT — see [LICENSE](./LICENSE).
-
-## Out of scope
-
-Hosted SaaS, billing, indexing, MEV, tokens, private-key custody.

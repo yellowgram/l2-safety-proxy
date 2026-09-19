@@ -14,7 +14,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
-    "bench": "tsx scripts/bench.ts"
+    "bench": "tsx scripts/bench.ts",
+    "demo:offline": "node scripts/demo-offline.mjs",
+    "demo:live": "node scripts/live-smoke-cache.mjs"
   },
   "engines": {
     "node": ">=20"
