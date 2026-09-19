@@ -1,6 +1,6 @@
-# Soft WTP targets (DRAFT — not sent)
+# Soft WTP targets (SEND ATTEMPTED — blocked)
 
-**Status: DRAFT — not sent.** CoS authorized ≤5 soft WTP prep on 2026-09-19.  
+**Status: SEND ATTEMPTED 2026-09-19 ~02:35 ET — all 5 BLOCKED (gh fine-grained PAT 403 on third-party createIssue/createDiscussion).** CoS authorized ≤5 soft WTP prep on 2026-09-19. See [SEND_LOG.md](../SEND_LOG.md).  
 **Guardrails:** no spam, no DM abuse, no early AF apply, ₹0. Do **not** send until an explicit send step. Prefer public non-DM surfaces.
 
 Public repo: https://github.com/yellowgram/l2-safety-proxy  
@@ -16,7 +16,7 @@ Discovery questions (from [SOFT_WTP.md](../SOFT_WTP.md)): failed-tx support/gas 
 | --- | --- |
 | **Fit** | Agent-infra wallet toolkit that submits onchain txs (Base/Arb/etc.). Pre-broadcast definite-revert abort + fail-open maps to agent submit reliability without custody. |
 | **Public contact** | GitHub Issues / Discussions on https://github.com/coinbase/agentkit (prefer issue or discussion over Discord DM). |
-| **Status** | DRAFT — not sent |
+| **Status** | **BLOCKED** 2026-09-19 ET — `403 createIssue` on `coinbase/agentkit` (fine-grained PAT). Not sent. |
 
 **Discovery message draft:**
 
@@ -30,7 +30,7 @@ Discovery questions (from [SOFT_WTP.md](../SOFT_WTP.md)): failed-tx support/gas 
 | --- | --- |
 | **Fit** | Multisig / smart-account wallet stack; proposers and operators still pay for predictable reverts on L2. Thin send-path guard complements protocol kit without replacing Safe. |
 | **Public contact** | GitHub Discussions: https://github.com/safe-global/safe-core-sdk/discussions (Q&A / Ideas). |
-| **Status** | DRAFT — not sent |
+| **Status** | **BLOCKED** 2026-09-19 ET — Discussions available (Q&A); `403 createDiscussion`. Not sent. Fallback Issue not attempted after Discussion 403 (same PAT). |
 
 **Discovery message draft:**
 
@@ -44,7 +44,7 @@ Discovery questions (from [SOFT_WTP.md](../SOFT_WTP.md)): failed-tx support/gas 
 | --- | --- |
 | **Fit** | Smart-wallet / AA SDK with sponsored and batched sends across L2s. Complementary safety layer in front of bundler/RPC paths for definite reverts before broadcast. |
 | **Public contact** | GitHub Issues on https://github.com/alchemyplatform/aa-sdk (feature/feedback issues; avoid private support tickets for cold discovery). |
-| **Status** | DRAFT — not sent |
+| **Status** | **BLOCKED** 2026-09-19 ET — repo verified `alchemyplatform/aa-sdk`; `403 createIssue`. Not sent. |
 
 **Discovery message draft:**
 
@@ -58,7 +58,7 @@ Discovery questions (from [SOFT_WTP.md](../SOFT_WTP.md)): failed-tx support/gas 
 | --- | --- |
 | **Fit** | Managed Arbitrum Orbit + OP Stack rollup operator; chain operators and their apps absorb failed-send support on custom L2 RPCs. Middleware-in-front-of-RPC matches their model. |
 | **Public contact** | Public email `support@conduit.xyz` (listed on GitHub org) **or** a public GitHub issue on an appropriate `conduitxyz/*` repo if filing as integrator feedback — prefer email/issue over Discord DM. |
-| **Status** | DRAFT — not sent |
+| **Status** | **BLOCKED** 2026-09-19 ET — preferred Issue on `conduitxyz/integrations` → `403 createIssue`; email skipped (no Gmail / task forbid). Not sent. |
 
 **Discovery message draft:**
 
@@ -72,7 +72,7 @@ Discovery questions (from [SOFT_WTP.md](../SOFT_WTP.md)): failed-tx support/gas 
 | --- | --- |
 | **Fit** | EVM wallet with strong security UX; users still hit predictable reverts on L2. Drop-in RPC middleware could reduce failed broadcasts without Rabby holding different custody assumptions. |
 | **Public contact** | GitHub Issues on https://github.com/RabbyHub/Rabby (public issue; do not cold-DM Discord). |
-| **Status** | DRAFT — not sent |
+| **Status** | **BLOCKED** 2026-09-19 ET — `403 createIssue` on `RabbyHub/Rabby`. Not sent. |
 
 **Discovery message draft:**
 
