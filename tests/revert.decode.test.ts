@@ -30,6 +30,37 @@ describe("decodeRevertData", () => {
     expect(d.reason).toMatch(/overflow/i);
   });
 
+  it.each([
+    [0x01n, /assert/i],
+    [0x12n, /division by zero/i],
+    [0x32n, /out of bounds/i],
+    [0x00n, /generic panic/i],
+    [0x21n, /enum/i],
+    [0x31n, /pop on empty/i],
+    [0x41n, /memory/i],
+    [0x51n, /uninitialized/i],
+  ] as const)("decodes Panic code %s", (code, pattern) => {
+    const data = encodeErrorResult({
+      abi: COMMON_ERRORS_ABI,
+      errorName: "Panic",
+      args: [code],
+    });
+    const d = decodeRevertData(data);
+    expect(d.kind).toBe("panic");
+    expect(d.reason).toMatch(pattern);
+  });
+
+  it("unknown panic code falls back sensibly", () => {
+    const data = encodeErrorResult({
+      abi: COMMON_ERRORS_ABI,
+      errorName: "Panic",
+      args: [0x99n],
+    });
+    const d = decodeRevertData(data);
+    expect(d.kind).toBe("panic");
+    expect(d.reason).toMatch(/panic code 153|0x99|153/i);
+  });
+
   it("handles empty revert", () => {
     expect(decodeRevertData("0x").kind).toBe("empty");
     expect(decodeRevertData(null).kind).toBe("empty");

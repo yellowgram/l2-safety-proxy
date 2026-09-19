@@ -81,6 +81,7 @@ describe("mocked HTTP integration", () => {
     const config: GuardConfig = {
       listenHost: "127.0.0.1",
       listenPort: 0,
+      guardMode: "open",
       failOpen: true,
       defaultChain: "arb-sepolia",
       chains: {
@@ -115,6 +116,7 @@ describe("mocked HTTP integration", () => {
     expect(health.ok).toBe(true);
     expect(health.chains).toContain("arb-sepolia");
     expect(health.chains).toContain("op-sepolia");
+    expect(health.guardMode).toBe("open");
     expect(health.failOpen).toBe(true);
   });
 
@@ -144,6 +146,7 @@ describe("mocked HTTP integration", () => {
     const config: GuardConfig = {
       listenHost: "127.0.0.1",
       listenPort: 0,
+      guardMode: "open",
       failOpen: true,
       defaultChain: "arb-sepolia",
       chains: {
@@ -173,7 +176,10 @@ describe("mocked HTTP integration", () => {
     expect(res.jsonrpc).toBe("2.0");
     expect(res.error).toBeDefined();
     expect(res.error.code).toBe(-32080);
-    expect(res.error.data.confidence).toBe("definite");
+    expect(res.error.data.decision).toBe("abort");
+    expect(res.error.data.confidence).toBe("eth_call");
+    expect(res.error.data.certainty).toBe("definite");
+    expect(res.error.data.chainId).toBe(421614);
     expect(res.error.data.aborted).toBe(true);
     expect(String(res.error.message + res.error.data.reason)).toMatch(/transfer failed/i);
   });
@@ -187,6 +193,7 @@ describe("mocked HTTP integration", () => {
     const config: GuardConfig = {
       listenHost: "127.0.0.1",
       listenPort: 0,
+      guardMode: "open",
       failOpen: true,
       defaultChain: "base-sepolia",
       chains: {

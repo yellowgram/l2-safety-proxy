@@ -106,6 +106,7 @@ async function runCase(label, mode) {
   const config = {
     listenHost: "127.0.0.1",
     listenPort: 0,
+    guardMode: "open",
     failOpen: true,
     defaultChain: "arb-sepolia",
     chains: {

@@ -52,6 +52,7 @@ describe("chain templates + loadConfig", () => {
     expect(cfg.defaultChain).toBe("arb-sepolia");
     expect(cfg.chains["op-sepolia"]?.upstreamRpcUrl).toBeTruthy();
     expect(cfg.chains["op-sepolia"]?.chainId).toBe(11155420);
+    expect(cfg.guardMode).toBe("open");
     expect(cfg.failOpen).toBe(true);
   });
 
@@ -65,3 +66,23 @@ describe("chain templates + loadConfig", () => {
     expect(cfg.chains["op-sepolia"]?.ecosystem).toBe("op-stack");
   });
 });
+
+  it("GUARD_MODE=strict maps to failOpen=false", () => {
+    stash({
+      GUARD_MODE: "strict",
+      L2SG_FAIL_OPEN: undefined,
+    });
+    const cfg = loadConfig();
+    expect(cfg.guardMode).toBe("strict");
+    expect(cfg.failOpen).toBe(false);
+  });
+
+  it("GUARD_MODE=open is default fail-open", () => {
+    stash({
+      GUARD_MODE: "open",
+      L2SG_FAIL_OPEN: undefined,
+    });
+    const cfg = loadConfig();
+    expect(cfg.guardMode).toBe("open");
+    expect(cfg.failOpen).toBe(true);
+  });

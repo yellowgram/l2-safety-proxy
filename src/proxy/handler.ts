@@ -2,16 +2,21 @@ import type { Hex } from "viem";
 import type {
   ChainConfig,
   GuardConfig,
+  GuardDecision,
+  GuardResponseMeta,
   JsonRpcRequest,
   JsonRpcResponse,
   SimResult,
 } from "../types/index.js";
 import {
   ERR_DEFINITE_REVERT,
+  ERR_STRICT_UNCERTAIN,
   ERR_UNSIGNED_SEND_REFUSED,
   SEND_METHODS,
   UNSIGNED_SEND_METHODS,
+  methodConfidence,
 } from "../types/index.js";
+import { decodeRevertData } from "../decode/revert.js";
 import { forwardRaw } from "../sim/rpcClient.js";
 import { simulateRawTransaction } from "../sim/simulator.js";
 
@@ -37,11 +42,9 @@ function resolveChain(
 ): ChainConfig {
   const headerKey =
     headers?.get("x-l2sg-chain") ?? headers?.get("x-chain-id");
-  // Also allow params meta via non-standard last-arg object — skip for KISS
   const key = headerKey?.trim() || config.defaultChain;
   const chain = config.chains[key];
   if (!chain) {
-    // Try match by numeric chainId header
     const byId = Object.values(config.chains).find(
       (c) => String(c.chainId) === key
     );
@@ -51,32 +54,75 @@ function resolveChain(
   return chain;
 }
 
+function buildMeta(
+  chain: ChainConfig,
+  decision: GuardDecision,
+  sim: SimResult,
+  extras: Partial<GuardResponseMeta> = {}
+): GuardResponseMeta {
+  const meta: GuardResponseMeta = {
+    l2SendGuard: true,
+    decision,
+    confidence: methodConfidence(sim.method),
+    certainty: sim.confidence,
+    chainId: chain.chainId,
+    simMethod: sim.method,
+    ...extras,
+  };
+  if (!sim.ok) {
+    meta.reason = sim.reason;
+    meta.code = sim.code;
+    if (sim.rawData) {
+      meta.rawData = sim.rawData;
+      const decoded = decodeRevertData(sim.rawData);
+      meta.decoded = {
+        reason: decoded.reason,
+        kind: decoded.kind,
+        ...(decoded.selector ? { selector: decoded.selector } : {}),
+      };
+    } else if (sim.reason) {
+      meta.decoded = { reason: sim.reason };
+    }
+  }
+  return meta;
+}
+
 function abortResponse(
   id: JsonRpcRequest["id"],
-  sim: Extract<SimResult, { ok: false }>
+  chain: ChainConfig,
+  sim: Extract<SimResult, { ok: false }>,
+  decision: GuardDecision = "abort"
 ): JsonRpcResponse {
+  const code =
+    sim.code === "DEFINITE_REVERT" ? ERR_DEFINITE_REVERT : ERR_STRICT_UNCERTAIN;
+  const meta = buildMeta(chain, decision, sim, {
+    aborted: true,
+    failOpen: false,
+  });
   return {
     jsonrpc: "2.0",
     id,
     error: {
-      code: ERR_DEFINITE_REVERT,
-      message: `L2 Send Guard: definite revert — ${sim.reason}`,
-      data: {
-        l2SendGuard: true,
-        confidence: sim.confidence,
-        code: sim.code,
-        reason: sim.reason,
-        simMethod: sim.method,
-        rawData: sim.rawData,
-        aborted: true,
-      },
+      code,
+      message: `L2 Send Guard: ${decision} — ${sim.reason}`,
+      data: meta,
     },
   };
+}
+
+function attachL2sg(
+  res: JsonRpcResponse,
+  meta: GuardResponseMeta
+): JsonRpcResponse {
+  return { ...res, l2sg: meta };
 }
 
 /**
  * Core middleware: intercept send methods → simulate → abort or fail-open.
  * All other methods are forwarded untouched.
+ *
+ * GUARD_MODE=open (default): uncertain → fail_open forward.
+ * GUARD_MODE=strict: uncertain / missing / unknown → abort.
  */
 export async function handleRequest(
   config: GuardConfig,
@@ -106,7 +152,6 @@ export async function handleRequest(
     };
   }
 
-  // Never accept unsigned sends — proxy has no keys and must not imply custody
   if (UNSIGNED_SEND_METHODS.has(req.method)) {
     return {
       jsonrpc: "2.0",
@@ -121,6 +166,7 @@ export async function handleRequest(
           code: "UNSIGNED_SEND_REFUSED",
           useMethod: "eth_sendRawTransaction",
           hint: "Point your JSON-RPC URL at this proxy; keep signing in your wallet/agent. See docs/AGENTS.md.",
+          chainId: chain.chainId,
         },
       },
     };
@@ -146,52 +192,48 @@ export async function handleRequest(
   try {
     sim = await simulate(chain, raw as Hex);
   } catch (err) {
-    // Unexpected throw → fail-open if configured
-    if (config.failOpen) {
-      return forward(chain.upstreamRpcUrl, req);
-    }
-    return {
-      jsonrpc: "2.0",
-      id: req.id,
-      error: {
-        code: -32000,
-        message: `simulation threw: ${err instanceof Error ? err.message : String(err)}`,
-      },
+    const thrown: SimResult = {
+      ok: false,
+      method: "unavailable",
+      confidence: "uncertain",
+      reason: `simulation threw: ${err instanceof Error ? err.message : String(err)}`,
+      code: "SIM_FAILURE",
     };
+    if (config.guardMode === "open") {
+      const upstream = await forward(chain.upstreamRpcUrl, req);
+      return attachL2sg(
+        upstream,
+        buildMeta(chain, "fail_open", thrown, { failOpen: true, aborted: false })
+      );
+    }
+    return abortResponse(req.id, chain, thrown);
   }
 
   // Success path → forward
   if (sim.ok) {
-    return forward(chain.upstreamRpcUrl, req);
+    const upstream = await forward(chain.upstreamRpcUrl, req);
+    return attachL2sg(
+      upstream,
+      buildMeta(chain, "forward", sim, { aborted: false, failOpen: false })
+    );
   }
 
   // Definite revert → abort (never forward)
   if (sim.confidence === "definite" && sim.code === "DEFINITE_REVERT") {
-    return abortResponse(req.id, sim);
+    return abortResponse(req.id, chain, sim, "abort");
   }
 
-  // Uncertain / sim failure → fail-open (default) or surface error
-  if (config.failOpen) {
-    return forward(chain.upstreamRpcUrl, req);
+  // Uncertain / sim failure
+  if (config.guardMode === "open") {
+    const upstream = await forward(chain.upstreamRpcUrl, req);
+    return attachL2sg(
+      upstream,
+      buildMeta(chain, "fail_open", sim, { failOpen: true, aborted: false })
+    );
   }
 
-  return {
-    jsonrpc: "2.0",
-    id: req.id,
-    error: {
-      code: -32000,
-      message: `L2 Send Guard: ${sim.code} — ${sim.reason}`,
-      data: {
-        l2SendGuard: true,
-        confidence: sim.confidence,
-        code: sim.code,
-        reason: sim.reason,
-        simMethod: sim.method,
-        aborted: false,
-        failOpen: false,
-      },
-    },
-  };
+  // strict: abort on missing / unknown / low-confidence
+  return abortResponse(req.id, chain, sim, "abort");
 }
 
 export async function handlePayload(

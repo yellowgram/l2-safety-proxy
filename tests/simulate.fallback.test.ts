@@ -121,6 +121,7 @@ describe("eth_simulateV1 unsupported → eth_call fallback", () => {
     const config: GuardConfig = {
       listenHost: "127.0.0.1",
       listenPort: 8545,
+      guardMode: "open",
       failOpen: true,
       defaultChain: "base-sepolia",
       chains: { "base-sepolia": baseChain() },
@@ -150,7 +151,9 @@ describe("eth_simulateV1 unsupported → eth_call fallback", () => {
     expect(methods).toEqual(["eth_simulateV1", "eth_call"]);
     expect(res.error?.code).toBe(ERR_DEFINITE_REVERT);
     expect(res.error?.data).toMatchObject({
-      confidence: "definite",
+      decision: "abort",
+      confidence: "eth_call",
+      certainty: "definite",
       aborted: true,
       simMethod: "eth_call",
     });
@@ -164,6 +167,7 @@ describe("eth_simulateV1 unsupported → eth_call fallback", () => {
     const config: GuardConfig = {
       listenHost: "127.0.0.1",
       listenPort: 8545,
+      guardMode: "open",
       failOpen: true,
       defaultChain: "base-sepolia",
       chains: { "base-sepolia": baseChain() },
@@ -231,6 +235,49 @@ describe("eth_simulateV1 unsupported → eth_call fallback", () => {
       expect(result.confidence).toBe("definite");
       expect(result.code).toBe("DEFINITE_REVERT");
       expect(result.reason).toBe("from-fallback");
+    }
+  });
+});
+
+describe("Arb Sepolia V1 shape reject → eth_call", () => {
+  it("treats cannot unmarshal / simOpts as unsupported and falls back", async () => {
+    const { clearSimulateV1CapabilityCache } = await import("../src/sim/capabilityCache.js");
+    const { simulateRawTransaction } = await import("../src/sim/simulator.js");
+    const { FAKE_RAW, FAKE_FROM } = await import("./fixtures.js");
+    clearSimulateV1CapabilityCache();
+    const chain = {
+      id: "arb-sepolia",
+      name: "Arbitrum Sepolia",
+      chainId: 421614,
+      upstreamRpcUrl: "http://arb",
+      preferSimulateV1: true,
+      ecosystem: "arbitrum" as const,
+    };
+    const methods: string[] = [];
+    const call = async (method: string) => {
+      methods.push(method);
+      if (method === "eth_simulateV1") {
+        const err = new Error(
+          "json: cannot unmarshal array into Go value of type rpc.simOpts"
+        ) as Error & { code?: number };
+        err.code = -32000;
+        throw err;
+      }
+      // eth_call definite revert
+      const err = new Error("execution reverted") as Error & { data?: string };
+      err.data = "0x";
+      throw err;
+    };
+    const result = await simulateRawTransaction(chain, FAKE_RAW, {
+      call,
+      recover: async () => FAKE_FROM,
+    });
+    expect(methods).toEqual(["eth_simulateV1", "eth_call"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.confidence).toBe("definite");
+      expect(result.method).toBe("eth_call");
+      expect(result.code).toBe("DEFINITE_REVERT");
     }
   });
 });
