@@ -15,6 +15,13 @@ Raw exports (optional CSV/JSON) go in [`docs/metrics/`](./metrics/) — keep fil
 | **Definite aborts** | Sims that returned `-32080` / `aborted: true` |
 | **Fail-opens** | Uncertain sims forwarded upstream |
 | **Notes** | Demo refreshes, SEO edits, blockers — one line |
+| **Eval corpus path** | Repo-relative path to offline fixture corpus (e.g. `evaluation/fixtures/corpus.jsonl`) |
+| **Eval corpus size** | Fixture count (target 200–500) |
+| **Eval pass/fail by class** | Rates for `abort_definite` / `probable` / `forward` / `infra_abort` from `npm run eval` |
+| **Broadcast hashes** | Public success send hashes (needs D1) — else `0` / none |
+| **Agent decisions** | Count from internal agent loop (needs D2) — else `0` |
+| **Buildathon** | `ON-TRACK` \| `AT-RISK` \| `SKIP` |
+| **Freeze breaches** | Always `0` or list; must stay `0` |
 
 ## Log
 
@@ -32,6 +39,18 @@ Raw exports (optional CSV/JSON) go in [`docs/metrics/`](./metrics/) — keep fil
   "definiteAborts": 0,
   "failOpens": 0,
   "chains": { "arb-sepolia": 0, "op-sepolia": 0, "base-sepolia": 0 },
+  "evalCorpusPath": "evaluation/fixtures/corpus.jsonl",
+  "evalCorpusSize": 0,
+  "evalByDecisionClass": {
+    "abort_definite": { "n": 0, "passRate": 0, "failRate": 0 },
+    "probable": { "n": 0, "passRate": 0, "failRate": 0 },
+    "forward": { "n": 0, "passRate": 0, "failRate": 0 },
+    "infra_abort": { "n": 0, "passRate": 0, "failRate": 0 }
+  },
+  "broadcastHashes": [],
+  "agentDecisions": 0,
+  "buildathon": "AT-RISK",
+  "freezeBreaches": 0,
   "notes": ""
 }
 ```
