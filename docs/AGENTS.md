@@ -35,3 +35,18 @@ Unlocking accounts / node-held keys is out of scope. Do not point an unlocked ge
 ## Health
 
 `GET /health` lists enabled chains (`arb-sepolia`, `op-sepolia`, `base-sepolia` by default), `chainDetails`, and which submit methods are accepted vs refused.
+
+
+## Thin `check()` API (Delta C)
+
+```ts
+import { check } from "l2-send-guard/agent";
+// check(rawTx, chain) → { decision, reason, certainty, simProvenance }
+```
+
+Founder loop (offline, ≥100 decisions, external users=0):
+
+```bash
+npm run agent:loop
+# → docs/agent-decisions.jsonl
+```

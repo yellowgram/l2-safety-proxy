@@ -38,6 +38,8 @@ curl -s http://127.0.0.1:8545/health
 ```bash
 npm run build
 npm run demo:sepolia
+npm run demo:delta-a   # Base Sepolia abort + faucet attempts (needs .env burner)
+npm run agent:loop     # ≥100 offline agent decisions → docs/agent-decisions.jsonl
 # Offline (no network): npm run demo:offline
 ```
 
