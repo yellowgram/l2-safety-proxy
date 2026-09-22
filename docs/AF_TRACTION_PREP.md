@@ -5,6 +5,23 @@ Arbitrum Foundation Infrastructure & Tools application after L2 Send Guard has
 real, repeatable traction. An idea-stage application is not ready and is
 expected to fail the late-development bar.
 
+
+## Live artifact URLs (verify before any future apply)
+
+| Artifact | URL |
+| --- | --- |
+| Repo | https://github.com/yellowgram/l2-safety-proxy |
+| LICENSE | https://github.com/yellowgram/l2-safety-proxy/blob/main/LICENSE |
+| PR #5 (gascap probe) | https://github.com/yellowgram/l2-safety-proxy/pull/5 |
+| ARCHITECTURE.md | https://github.com/yellowgram/l2-safety-proxy/blob/main/ARCHITECTURE.md |
+| BENCH.md | https://github.com/yellowgram/l2-safety-proxy/blob/main/BENCH.md |
+| docs/SMOKE.md | https://github.com/yellowgram/l2-safety-proxy/blob/main/docs/SMOKE.md |
+| docs/SEND_LOG.md | https://github.com/yellowgram/l2-safety-proxy/blob/main/docs/SEND_LOG.md |
+| docs/METRICS.md | https://github.com/yellowgram/l2-safety-proxy/blob/main/docs/METRICS.md |
+
+**users/teams=0; do not apply.**
+
+
 ## Eligibility and timing notes
 
 - [ ] Re-check the [Arbitrum Foundation grants page](https://arbitrum.foundation/grants)
@@ -91,7 +108,7 @@ proxy rather than rebuilding failover or indexing.
 
 ## Explicit hold
 
-**Do not apply yet.** No grant application should be submitted from this
+**Do not apply yet.** **users/teams=0; do not apply.** No grant application should be submitted from this
 checklist. Wait for the traction gates, assemble the evidence pack, re-check
 the Foundation page and KYC/KYB requirements, and only then decide whether a
 future application is warranted. Idea-stage work without late-development

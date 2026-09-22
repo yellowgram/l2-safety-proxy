@@ -28,7 +28,7 @@ Raw exports (optional CSV/JSON) go in [`docs/metrics/`](./metrics/) — keep fil
 | Week (ET) | Users/teams | Sims | Definite aborts | Fail-opens | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 2026-09-15 | 0 | 0 | 0 | 0 | CoS GO 2026-09-19: CI + GFI issues + soft-WTP drafts; offline demo verified. No external users yet. |
-| 2026-09-22 | 0 | 1+ (Base abort) | 1 live Base abort | 0 | Delta A+C + gascap probe: Arb Sepolia success hash in SEND_LOG; agent decisions=200; eval corpus=310; freezeBreaches=0; Buildathon=AT-RISK; Soft WTP 2/5; **reth#27342 probe merged** (PR #5) — `docs/metrics/2026-W39-gascap.json` |
+| 2026-09-22 | 0 | 1+ (Base abort) | 1 live Base abort | 0 | Delta A+C + gascap probe: Arb Sepolia success hash in SEND_LOG; agent decisions=200; eval corpus=310; freezeBreaches=0; Buildathon=AT-RISK; Soft WTP 2/5; **reth#27342 probe merged** (PR #5); offline smoke PASS 2026-09-22 (`docs/SMOKE.md`); users/teams=0 — `docs/metrics/2026-W39-gascap.json` |
 
 ## Export schema (optional)
 
