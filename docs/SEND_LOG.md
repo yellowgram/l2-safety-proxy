@@ -113,9 +113,12 @@ npm run demo:sepolia                  # live abort (+ forward if funded)
 node scripts/live-send-log.mjs        # live abort batch + faucet attempt
 ```
 
+
 ## Soft WTP (founder-sent)
 
 | # | target | URL | date ET | status | notes |
 | --- | --- | --- | --- | --- | --- |
-| 1/5 | Coinbase AgentKit | https://github.com/coinbase/agentkit/issues/1512 | 2026-09-22 | **SENT** (founder, not CoS) | Do **not** send 2–5; do **not** comment unless they reply |
+| 1/5 | Coinbase AgentKit | https://github.com/coinbase/agentkit/issues/1512 | 2026-09-22 | **SENT** (founder) | Do **not** bump unless they reply |
+| 2/5 | Safe{Core} SDK | https://github.com/safe-global/safe-core-sdk/discussions/1437 | 2026-09-22 | **SENT** (founder) | Discussion; do **not** bump |
 
+**Hold:** Soft WTP 3–5 not sent. Freeze/grants still off.
