@@ -1,7 +1,7 @@
 {
   "name": "l2-send-guard",
   "version": "0.2.0",
-  "description": "Multi-L2 pre-broadcast JSON-RPC safety middleware — simulate eth_sendRawTransaction, abort definite reverts, fail-open on uncertainty",
+  "description": "Multi-L2 pre-broadcast JSON-RPC safety middleware \u2014 simulate eth_sendRawTransaction, abort definite reverts, fail-open on uncertainty",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -21,7 +21,8 @@
     "eval": "tsx evaluation/run.ts",
     "eval:generate": "tsx evaluation/generate-fixtures.ts",
     "agent:loop": "tsx src/agent/loop.ts",
-    "demo:delta-a": "node --env-file=.env scripts/delta-a-live-proof.mjs"
+    "demo:delta-a": "node --env-file=.env scripts/delta-a-live-proof.mjs",
+    "probe:gascap": "bash scripts/check-rpc-gascap.sh"
   },
   "engines": {
     "node": ">=20"

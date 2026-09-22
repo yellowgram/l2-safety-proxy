@@ -72,6 +72,17 @@ Success / fail-open forwards attach metadata on JSON-RPC extension `l2sg`; abort
 
 Send decisions: [docs/SEND_LOG.md](./docs/SEND_LOG.md). Architecture: [ARCHITECTURE.md](./ARCHITECTURE.md).
 
+
+## Client probes
+
+Read-only check for Reth `#27342` (`eth_call` vs `eth_estimateGas` under `--rpc.gascap`):
+
+```bash
+RETH_BIN=$(which reth) npm run probe:gascap
+```
+
+Exit `2` = split (call capped/OOG, estimate returns gas > cap). No keys, no broadcast. Design notes: [docs/drafts/27342-design.md](./docs/drafts/27342-design.md).
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).
