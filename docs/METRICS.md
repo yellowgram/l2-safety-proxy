@@ -28,7 +28,7 @@ Raw exports (optional CSV/JSON) go in [`docs/metrics/`](./metrics/) — keep fil
 | Week (ET) | Users/teams | Sims | Definite aborts | Fail-opens | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 2026-09-15 | 0 | 0 | 0 | 0 | CoS GO 2026-09-19: CI + GFI issues + soft-WTP drafts; offline demo verified. No external users yet. |
-| 2026-09-22 | 0 | 1+ (Base abort) | 1 live Base abort | 0 | Delta A+C: burner `0xB055…dFA0`; faucet blocked (0 broadcast hashes); agent decisions=200 (`docs/agent-decisions.jsonl`); eval corpus=310; freezeBreaches=0; Buildathon=AT-RISK |
+| 2026-09-22 | 0 | 1+ (Base abort) | 1 live Base abort | 0 | Delta A+C + gascap probe: Arb Sepolia success hash in SEND_LOG; agent decisions=200; eval corpus=310; freezeBreaches=0; Buildathon=AT-RISK; Soft WTP 2/5; **reth#27342 probe merged** (PR #5) — `docs/metrics/2026-W39-gascap.json` |
 
 ## Export schema (optional)
 
@@ -55,3 +55,25 @@ Raw exports (optional CSV/JSON) go in [`docs/metrics/`](./metrics/) — keep fil
   "notes": ""
 }
 ```
+
+## Slice A — gascap probe (2026-09-22/23 ET)
+
+| Field | Value |
+| --- | --- |
+| status | **done** (hole closed: PR #5 merged) |
+| pr | https://github.com/yellowgram/l2-safety-proxy/pull/5 — **MERGED** |
+| reth issue | https://github.com/paradigmxyz/reth/issues/27342 |
+| comments | https://github.com/paradigmxyz/reth/issues/27342#issuecomment-5785549454 · follow-up https://github.com/paradigmxyz/reth/issues/27342#issuecomment-5785596654 |
+| reth_version | 2.6.0 |
+| rpc_gascap | 100000 |
+| eth_call_ceiling | 100000 |
+| eth_estimateGas_ceiling | 16777216 |
+| split | false (both OOG; estimate ceiling ≠ rpc.gascap) |
+| src_changed | false |
+| reth_pr | false |
+| main_blob | https://github.com/yellowgram/l2-safety-proxy/blob/main/scripts/check-rpc-gascap.sh (200) |
+| freeze_breaches | 0 |
+| next | **stop** |
+
+Export: [`docs/metrics/2026-W39-gascap.json`](./metrics/2026-W39-gascap.json)
+
