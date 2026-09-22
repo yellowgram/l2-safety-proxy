@@ -11,7 +11,7 @@ Columns: `ts` · `chain` · `mode` · `decision` · `confidence` · `txHash|simI
 | Local / mocked sim rows | 24 |
 | Live Arb Sepolia abort rows (simId) | 5 |
 | Live Base Sepolia abort rows (simId) | **1** (Delta A 2026-09-22) |
-| Live broadcast tx hashes (success receipt) | **0** (faucet blocked — feasibility note below) |
+| Live broadcast tx hashes (success receipt) | **1** (Arb Sepolia 2026-09-22 via Guard proxy) |
 
 ## Local / sim
 
@@ -52,6 +52,20 @@ Columns: `ts` · `chain` · `mode` · `decision` · `confidence` · `txHash|simI
 | 2026-09-19T09:07:18 ET | arb-sepolia | open | abort | eth_call | `sim:0xa69a9e6cdb7a8e8da80cf6cfcc8f88c4ca69033bbbd7b6adfc770d22e364facc` | live abort #4 decoded=execution reverted (no data) code=-32080 |
 | 2026-09-19T09:07:18 ET | arb-sepolia | open | abort | eth_call | `sim:0x9d146b8e8e9a4525c07dc8062fc02002c25ff1efb26f3f212f014eb7594d069d` | live abort #5 decoded=execution reverted (no data) code=-32080 |
 | 2026-09-19T09:07:51 ET | arb-sepolia | open | n/a | n/a | — | FAUCET BLOCKED — triangle HTTP 503 Service Suspended; learnweb3 HTML-only (no drip API). Forward live-hash slice STOPPED. No invented hashes. Abort live simIds above are keccak256(signed raw) against public Arb Sepolia RPC (not broadcast). |
+| 2026-09-22T12:22:12 ET | arb-sepolia | open | forward | eth_call | `0xcb430b1551af27e407ab80c2d01c53ce052ba501e983725426431c421b7caac4` | SUCCESS-PATH self-transfer value=0 via Guard proxy; receipt status=1 (0x1); block=311608205; gasUsed=22086; burner=0x2C9c87139D41C6cE90c6c6A39Fe0C4bd64d3108D; balanceBefore=0.001 ETH (RPC-verified); explorer=https://sepolia.arbiscan.io/tx/0xcb430b1551af27e407ab80c2d01c53ce052ba501e983725426431c421b7caac4 |
+
+### Success-path forward broadcast (Arb Sepolia — 2026-09-22)
+
+| Field | Value |
+| --- | --- |
+| burner (public) | `0x2C9c87139D41C6cE90c6c6A39Fe0C4bd64d3108D` |
+| path | Guard proxy (`eth_sendRawTransaction` → decision=forward, certainty=definite, simMethod=eth_call) |
+| txHash | `0xcb430b1551af27e407ab80c2d01c53ce052ba501e983725426431c421b7caac4` |
+| receipt status | **1** (`0x1` success) |
+| blockNumber | 311608205 |
+| gasUsed | 22086 |
+| explorer | https://sepolia.arbiscan.io/tx/0xcb430b1551af27e407ab80c2d01c53ce052ba501e983725426431c421b7caac4 |
+| note | Faucet funded 0.001 ETH verified on public Arb Sepolia RPC (`eth_getBalance` → `0x38d7ea4c68000`). Minimal EIP-1559 self-transfer (to=self, value=0). Real hash only — no invented hashes. Machine-readable: [`docs/success-path-evidence.json`](./success-path-evidence.json) (local). |
 
 ## Live Base Sepolia — Delta A (2026-09-22)
 
