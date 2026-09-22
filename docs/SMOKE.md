@@ -1,3 +1,26 @@
+# Offline smoke
+
+## Offline demo — 2026-09-22 ~19:24 ET
+
+**Result:** PASS (`npm test` 76/76; `npm run build`; `node scripts/demo-offline.mjs`)
+
+| Check | Result |
+| --- | --- |
+| Unit tests | **PASS** — 14 files / 76 tests |
+| Build | **PASS** — `tsc` |
+| Definite-revert abort | **PASS** — `-32080`, upstream sends: 0 |
+| Fail-open forward | **PASS** — uncertain path forwarded, upstream sends: 1 |
+
+Reproduce:
+
+```bash
+npm test && npm run build && node scripts/demo-offline.mjs
+```
+
+Live Sepolia not re-run this row (no new keys/burner). Prior live rows below unchanged.
+
+---
+
 # Sepolia live smoke
 
 ## Arb Sepolia definite-abort — 2026-09-19 ~09:07 ET
