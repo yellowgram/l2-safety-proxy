@@ -1,0 +1,36 @@
+{
+  "date": "2026-09-23",
+  "weekStartEt": "2026-09-22",
+  "owner": "yellowgram",
+  "repo": "yellowgram/l2-safety-proxy",
+  "slice": "A-gascap-probe",
+  "status": "done",
+  "pr": "https://github.com/yellowgram/l2-safety-proxy/pull/5",
+  "pr_state": "merged",
+  "branch": "feat/probe-reth-27342-gascap",
+  "reth_issue": "https://github.com/paradigmxyz/reth/issues/27342",
+  "comment": "https://github.com/paradigmxyz/reth/issues/27342#issuecomment-5785549454",
+  "comment_followup": "https://github.com/paradigmxyz/reth/issues/27342#issuecomment-5785596654",
+  "reth_version": "2.6.0",
+  "rpc_gascap": 100000,
+  "eth_call_ceiling": 100000,
+  "eth_estimateGas_ceiling": 16777216,
+  "split": false,
+  "interpretation": "estimate ceiling is EIP-7825 2^24 not rpc.gascap; infinite-loop payload OOGs both paths so split flag false",
+  "src_changed": false,
+  "reth_pr": false,
+  "main_blob_404": false,
+  "main_blob": "https://github.com/yellowgram/l2-safety-proxy/blob/main/scripts/check-rpc-gascap.sh",
+  "usersTeams": 0,
+  "broadcastHashes": [
+    "0xcb430b1551af27e407ab80c2d01c53ce052ba501e983725426431c421b7caac4"
+  ],
+  "agentDecisions": 200,
+  "evalCorpusSize": 310,
+  "buildathon": "AT-RISK",
+  "freezeBreaches": 0,
+  "next": [
+    "stop"
+  ],
+  "updatedAt": "2026-09-22T22:56:13Z"
+}
