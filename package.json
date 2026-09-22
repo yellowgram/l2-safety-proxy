@@ -17,7 +17,9 @@
     "bench": "tsx scripts/bench.ts",
     "demo:offline": "node scripts/demo-offline.mjs",
     "demo:live": "node scripts/live-smoke-cache.mjs",
-    "demo:sepolia": "node scripts/demo-sepolia.mjs"
+    "demo:sepolia": "node scripts/demo-sepolia.mjs",
+    "eval": "tsx evaluation/run.ts",
+    "eval:generate": "tsx evaluation/generate-fixtures.ts"
   },
   "engines": {
     "node": ">=20"

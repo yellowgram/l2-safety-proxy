@@ -5,3 +5,8 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# Eval harness reports (regenerate via npm run eval)
+evaluation/report/*.json
+evaluation/report/*.md
+!evaluation/report/.gitkeep
