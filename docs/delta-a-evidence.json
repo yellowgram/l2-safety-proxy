@@ -1,0 +1,72 @@
+{
+  "ts": "2026-09-22T11:42:42 ET",
+  "burnerAddress": "0xB055a37C207EbC1F7BD882353d513303B577dFA0",
+  "chain": "base-sepolia",
+  "abort": {
+    "ok": true,
+    "decision": "abort",
+    "certainty": "definite",
+    "confidence": "eth_call",
+    "simMethod": "eth_call",
+    "simId": "sim:0x0af1f8557e542856aa8335eb08c32e00c269ff9c45583ca62036adee5627e5c0",
+    "errorCode": -32080,
+    "decoded": "execution reverted"
+  },
+  "forward": {
+    "hash": null,
+    "receiptStatus": null,
+    "note": "FAUCET BLOCKED — all public drips failed/suspended/captcha. Forward live-hash slice STOPPED. No invented hashes."
+  },
+  "faucetAttempts": [
+    {
+      "ts": "2026-09-22T11:42:34 ET",
+      "name": "triangle-base",
+      "chainKey": "base-sepolia",
+      "status": 503,
+      "note": "HTTP 503 <!DOCTYPE html> <html lang=\"en\"> <head> <meta charset=\"UTF-8\"> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /> <title>Service"
+    },
+    {
+      "ts": "2026-09-22T11:42:34 ET",
+      "name": "triangle-base-retry",
+      "chainKey": "base-sepolia",
+      "status": 503,
+      "note": "HTTP 503 <!DOCTYPE html> <html lang=\"en\"> <head> <meta charset=\"UTF-8\"> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /> <title>Service"
+    },
+    {
+      "ts": "2026-09-22T11:42:34 ET",
+      "name": "triangle-arb",
+      "chainKey": "arb-sepolia",
+      "status": 503,
+      "note": "HTTP 503 <!DOCTYPE html> <html lang=\"en\"> <head> <meta charset=\"UTF-8\"> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /> <title>Service"
+    },
+    {
+      "ts": "2026-09-22T11:42:34 ET",
+      "name": "triangle-op",
+      "chainKey": "op-sepolia",
+      "status": 429,
+      "note": "HTTP 429 <!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"><meta http-equiv=\"X-UA"
+    },
+    {
+      "ts": "2026-09-22T11:42:35 ET",
+      "name": "chainlink",
+      "chainKey": "base-sepolia",
+      "status": 400,
+      "note": "HTTP 400 {\"success\":false,\"message\":\"Could not verify if you are human.\"}"
+    },
+    {
+      "ts": "2026-09-22T11:42:35 ET",
+      "name": "quicknode-page",
+      "chainKey": "base-sepolia",
+      "status": 200,
+      "note": "HTTP 200 <!DOCTYPE html><!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/><script async=\"\" "
+    },
+    {
+      "ts": "2026-09-22T11:42:35 ET",
+      "name": "learnweb3",
+      "chainKey": "base-sepolia",
+      "status": 503,
+      "note": "HTTP 503 <!DOCTYPE html> <html lang=\"en\"> <head> <meta charset=\"UTF-8\"> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /> <title>Service"
+    }
+  ],
+  "funded": false
+}

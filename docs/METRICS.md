@@ -28,6 +28,7 @@ Raw exports (optional CSV/JSON) go in [`docs/metrics/`](./metrics/) — keep fil
 | Week (ET) | Users/teams | Sims | Definite aborts | Fail-opens | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 2026-09-15 | 0 | 0 | 0 | 0 | CoS GO 2026-09-19: CI + GFI issues + soft-WTP drafts; offline demo verified. No external users yet. |
+| 2026-09-22 | 0 | 1+ (Base abort) | 1 live Base abort | 0 | Delta A+C: burner `0xB055…dFA0`; faucet blocked (0 broadcast hashes); agent decisions=200 (`docs/agent-decisions.jsonl`); eval corpus=310; freezeBreaches=0; Buildathon=AT-RISK |
 
 ## Export schema (optional)
 
