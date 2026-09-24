@@ -129,6 +129,11 @@ export function loadSpendPolicy(): SpendPolicyConfig {
     policy.destinations = parseDestinations(file.destinations);
     if (file.chains) {
       for (const [key, overlay] of Object.entries(file.chains)) {
+        const overlayGlobal = parseWei(
+          overlay.globalMaxNativeWei,
+          overlay.globalMaxNativeEth,
+          `chains[${key}].globalMaxNative`
+        );
         policy.chains[key] = {
           ...(overlay.allowContractCreation !== undefined
             ? { allowContractCreation: !!overlay.allowContractCreation }
@@ -139,18 +144,8 @@ export function loadSpendPolicy(): SpendPolicyConfig {
           ...(overlay.erc20RecipientCheck !== undefined
             ? { erc20RecipientCheck: !!overlay.erc20RecipientCheck }
             : {}),
-          ...(parseWei(
-            overlay.globalMaxNativeWei,
-            overlay.globalMaxNativeEth,
-            `chains[${key}].globalMaxNative`
-          ) !== undefined
-            ? {
-                globalMaxNativeWei: parseWei(
-                  overlay.globalMaxNativeWei,
-                  overlay.globalMaxNativeEth,
-                  `chains[${key}].globalMaxNative`
-                ),
-              }
+          ...(overlayGlobal !== undefined
+            ? { globalMaxNativeWei: overlayGlobal }
             : {}),
           destinations: parseDestinations(overlay.destinations),
         };
