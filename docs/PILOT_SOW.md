@@ -2,16 +2,23 @@
 
 **Not an AF / ESP grant pack.** Use this when an inbound team wants a fixed pilot invoice for Guard dual-layer drop-in.
 
+**How buyers reply:** GitHub Issues / Discussions on [yellowgram/l2-safety-proxy](https://github.com/yellowgram/l2-safety-proxy), **or** email `CONTACT_EMAIL_TBA` when published. Do not invent a founder email.
+
+**Internal send rule:** CoS / agents **draft** this SOW; the **founder sends** it to the inbound contact. Never CoS cold-send.
+
 | Field | Fill in |
 | --- | --- |
 | **Customer** | |
 | **Primary contact** | |
+| **Reply channel** | GitHub Issue/Discussion URL · or email (`CONTACT_EMAIL_TBA`) |
 | **Chains** | e.g. Arb / Base / OP Sepolia → mainnet later |
 | **Agent stack** | AgentKit / viem / ethers / other |
 | **SKU / price** | See [SUPPORT.md](../SUPPORT.md) or custom USD/INR |
-| **Invoice path** | USDT / Wise / Razorpay (details on invoice) |
+| **Invoice path** | Founder provides payee details on invoice (USDT / Wise / Razorpay / other — **not** invented in this repo) |
 | **Start date** | |
 | **End date** | |
+
+Demo proof before / during pilot: [`INBOUND_DEMO.md`](./INBOUND_DEMO.md). Positioning: [`COMPETITIVE.md`](./COMPETITIVE.md).
 
 ## Deliverables (edit)
 
@@ -36,4 +43,4 @@ Pilot **accepted = paid** (or written waiver). OSS usage without a pilot remains
 
 ## Non-goals
 
-Custody · Safe-clone · hosted SaaS · grant submission theater.
+Custody · Safe-clone · hosted SaaS · grant submission theater · CoS cold outreach.
