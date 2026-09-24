@@ -50,3 +50,8 @@ Founder loop (offline, ≥100 decisions, external users=0):
 npm run agent:loop
 # → docs/agent-decisions.jsonl
 ```
+
+
+## Layer 2 (optional)
+
+If `L2SG_POLICY_ENABLED` / policy file is on, address/spend allowlist+caps run **before** sim. Denials are `-32083` / `policy_denied` (not fail-open). `checkWithConfig` applies `config.policy` the same way. Default off.
