@@ -11,6 +11,7 @@ import { FAKE_RAW, FAKE_FROM } from "./fixtures.js";
 import { handleRequest } from "../src/proxy/handler.js";
 import type { GuardConfig } from "../src/types/index.js";
 import { ERR_DEFINITE_REVERT } from "../src/types/index.js";
+import { defaultSpendPolicy } from "../src/policy/index.js";
 
 const baseChain = (over: Partial<ChainConfig> = {}): ChainConfig => ({
   id: "base-sepolia",
@@ -123,6 +124,7 @@ describe("eth_simulateV1 unsupported → eth_call fallback", () => {
       listenPort: 8545,
       guardMode: "open",
       failOpen: true,
+    policy: defaultSpendPolicy(),
       defaultChain: "base-sepolia",
       chains: { "base-sepolia": baseChain() },
     };
@@ -169,6 +171,7 @@ describe("eth_simulateV1 unsupported → eth_call fallback", () => {
       listenPort: 8545,
       guardMode: "open",
       failOpen: true,
+    policy: defaultSpendPolicy(),
       defaultChain: "base-sepolia",
       chains: { "base-sepolia": baseChain() },
     };

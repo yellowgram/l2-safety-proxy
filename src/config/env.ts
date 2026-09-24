@@ -3,6 +3,7 @@ import {
   PUBLIC_RPC_DEFAULTS,
 } from "./chains.js";
 import type { ChainConfig, GuardConfig, GuardMode } from "../types/index.js";
+import { loadSpendPolicy } from "../policy/load.js";
 
 function env(key: string, fallback?: string): string | undefined {
   const v = process.env[key];
@@ -84,6 +85,8 @@ export function loadConfig(): GuardConfig {
     );
   }
 
+  const policy = loadSpendPolicy();
+
   return {
     listenHost,
     listenPort,
@@ -91,5 +94,6 @@ export function loadConfig(): GuardConfig {
     defaultChain,
     guardMode,
     failOpen,
+    policy,
   };
 }

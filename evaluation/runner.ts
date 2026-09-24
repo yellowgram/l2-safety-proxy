@@ -10,6 +10,7 @@ import type {
   GuardResponseMeta,
   SimResult,
 } from "../src/types/index.js";
+import { defaultSpendPolicy } from "../src/policy/index.js";
 import { classifyDecision } from "./classify.js";
 import type {
   ClassStats,
@@ -83,6 +84,7 @@ function buildConfig(fixture: EvalFixture): GuardConfig {
     listenPort: 0,
     guardMode: fixture.guardMode,
     failOpen: fixture.guardMode === "open",
+    policy: defaultSpendPolicy(),
     defaultChain: fixture.chainKey,
     chains: { [fixture.chainKey]: chain },
   };
