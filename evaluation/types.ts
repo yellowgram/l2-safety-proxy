@@ -7,7 +7,8 @@ export type DecisionClass =
   | "abort_definite"
   | "probable"
   | "forward"
-  | "infra_abort";
+  | "infra_abort"
+  | "policy_denied";
 
 export type FixtureGuardMode = "open" | "strict";
 
@@ -32,7 +33,7 @@ export interface FixtureExpected {
   /** Metrics decision class */
   decisionClass: DecisionClass;
   /** Guard surface decision */
-  decision: "abort" | "fail_open" | "forward";
+  decision: "abort" | "fail_open" | "forward" | "policy_denied";
   /** Whether eth_sendRawTransaction must reach upstream */
   forwarded: boolean;
 }
@@ -47,6 +48,11 @@ export interface EvalFixture {
   sim: FixtureSim;
   expected: FixtureExpected;
   tags?: string[];
+  /**
+   * When set, runner enables Layer 2 with this allowlist (lowercase addresses).
+   * Empty array → deny all destinations (policy_denied before sim).
+   */
+  policyAllowlist?: string[];
 }
 
 export interface FixtureResult {

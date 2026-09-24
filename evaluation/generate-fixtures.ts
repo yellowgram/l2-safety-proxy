@@ -32,13 +32,15 @@ type Scenario = {
   method: "eth_simulateV1" | "eth_call" | "unavailable";
   guardMode: FixtureGuardMode;
   decisionClass: DecisionClass;
-  decision: "abort" | "fail_open" | "forward";
+  decision: "abort" | "fail_open" | "forward" | "policy_denied";
   forwarded: boolean;
   tag: string;
+  /** When set, Layer 2 enabled with this allowlist (deny if raw to not listed). */
+  policyAllowlist?: string[];
 };
 
 /**
- * Target ~300 fixtures across classes (200–500 band).
+ * Target ~340 fixtures across classes including Layer 2 policy_denied (200–500 band).
  * Counts chosen for stable weekly METRICS denominators.
  */
 const PLAN: Array<{ scenario: Scenario; count: number }> = [
@@ -142,6 +144,33 @@ const PLAN: Array<{ scenario: Scenario; count: number }> = [
       tag: "infra-throw-strict",
     },
   },
+  // policy_denied (~30): Layer 2 deny before sim (allowlist excludes fixture to=0x…0001)
+  {
+    count: 15,
+    scenario: {
+      simKind: "success",
+      method: "eth_call",
+      guardMode: "open",
+      decisionClass: "policy_denied",
+      decision: "policy_denied",
+      forwarded: false,
+      tag: "policy-denied-open",
+      policyAllowlist: ["0x1111111111111111111111111111111111111111"],
+    },
+  },
+  {
+    count: 15,
+    scenario: {
+      simKind: "definite_revert",
+      method: "eth_call",
+      guardMode: "strict",
+      decisionClass: "policy_denied",
+      decision: "policy_denied",
+      forwarded: false,
+      tag: "policy-denied-strict",
+      policyAllowlist: ["0x2222222222222222222222222222222222222222"],
+    },
+  },
 ];
 
 function paddedId(n: number): string {
@@ -195,6 +224,9 @@ function buildFixtures(): EvalFixture[] {
           forwarded: scenario.forwarded,
         },
         tags: [scenario.tag, chain.chainKey, scenario.guardMode],
+        ...(scenario.policyAllowlist
+          ? { policyAllowlist: scenario.policyAllowlist }
+          : {}),
       };
       out.push(fixture);
     }
