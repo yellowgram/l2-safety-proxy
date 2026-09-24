@@ -7,6 +7,9 @@
 
 Public: `git clone https://github.com/yellowgram/l2-safety-proxy.git`
 
+> **Paid help (optional):** fixed-scope AgentKit wire-up / policy pack review / retainer — see **[SUPPORT.md](./SUPPORT.md)**. OSS core stays free.  
+> **Inbound demo (no keys):** [`docs/INBOUND_DEMO.md`](./docs/INBOUND_DEMO.md) · sim ≠ policy: [`docs/COMPETITIVE.md`](./docs/COMPETITIVE.md)
+
 ## What
 
 | | |
@@ -35,6 +38,8 @@ curl -s http://127.0.0.1:8545/health
 ```
 
 ## Demo (Arb Sepolia, ~10 min)
+
+Stranger walkthrough + expected PASS transcript: [`docs/INBOUND_DEMO.md`](./docs/INBOUND_DEMO.md).
 
 ```bash
 npm run build
@@ -110,7 +115,8 @@ Agent policy template: [`policy.agent.example.json`](./policy.agent.example.json
 
 ## Paid support (optional)
 
-OSS core stays free. Fixed SKUs (AgentKit wire-up, policy pack review, priority retainer): [`SUPPORT.md`](./SUPPORT.md).
+OSS core stays free. Fixed SKUs (AgentKit wire-up, policy pack review, priority retainer): [`SUPPORT.md`](./SUPPORT.md).  
+Reply on GitHub Issues / Discussions, or email `CONTACT_EMAIL_TBA`. Demo first: [`docs/INBOUND_DEMO.md`](./docs/INBOUND_DEMO.md).
 
 ## Client probes
 

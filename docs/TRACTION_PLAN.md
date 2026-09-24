@@ -13,6 +13,8 @@
 
 Public Q&A (ethereum-magicians, StackExchange) is **draft-only** until a human reviews — see weekly backlog.
 
+Paid-surface kill clock (inbound only; Soft WTP freeze): [INCOME_GATE.md](./INCOME_GATE.md). Inbound demo pack: [INBOUND_DEMO.md](./INBOUND_DEMO.md).
+
 ---
 
 ## Weekly cadence (agent checklist)
