@@ -105,3 +105,36 @@ await fetch(url, {
 - `eth_sendTransaction` is **refused** (`-32081`) — sign externally and use `eth_sendRawTransaction`. See [docs/AGENTS.md](../../docs/AGENTS.md).
 - Chain keys: `arb-sepolia`, `op-sepolia`, `base-sepolia`.
 - No secrets belong in the SDK. Do not commit private keys.
+
+## Typed errors (`-32080` / `-32083`)
+
+```ts
+import {
+  isDefiniteRevertError,
+  isPolicyDeniedError,
+  classifyGuardError,
+} from "l2-send-guard/sdk";
+
+try {
+  await client.sendTransaction({ ... });
+} catch (err) {
+  if (isDefiniteRevertError(err)) {
+    // Layer 1 — definite revert aborted; do not broadcast same calldata
+  } else if (isPolicyDeniedError(err)) {
+    // Layer 2 — allowlist/caps; never fail-open
+  } else {
+    const kind = classifyGuardError(err); // definite_revert | policy_denied | ...
+    throw err;
+  }
+}
+```
+
+## AgentKit / CDP
+
+See [`examples/agentkit-viem.ts`](../../examples/agentkit-viem.ts) — pass Guard `proxyUrl` + `x-l2sg-chain` via `viemHttpArgs` / `createGuardFetch`. No `@coinbase/agentkit` dependency in this package.
+
+**CDP Policy Engine** (hosted allowlist / `ethValue`) is complementary. Guard adds **Layer 1 definite-revert simulation** and **self-hosted** Layer 2 for local-sign / non-CDP RPC paths. We do not replace CDP. Competitive one-pager: [docs/COMPETITIVE.md](../../docs/COMPETITIVE.md).
+
+## Layer 2
+
+When the proxy has policy enabled, denials surface as `-32083` with `data.layer: 2` and `data.decision: "policy_denied"`. Agent template: [`policy.agent.example.json`](../../policy.agent.example.json).

@@ -22,6 +22,7 @@ import { evaluateSpendPolicy, notifyPolicyDenied } from "../policy/index.js";
 import { forwardRaw } from "../sim/rpcClient.js";
 import { simulateRawTransaction } from "../sim/simulator.js";
 import { parseRawTransaction } from "../sim/txParse.js";
+import { recordDecision } from "./counters.js";
 
 export type SimulateFn = (
   chain: ChainConfig,
@@ -103,6 +104,7 @@ function abortResponse(
     aborted: true,
     failOpen: false,
   });
+  recordDecision(decision);
   return {
     jsonrpc: "2.0",
     id,
@@ -141,6 +143,7 @@ function policyDeniedResponse(
     value: `0x${opts.valueWei.toString(16)}` as `0x${string}`,
     hint: "Update Layer 2 policy allowlist/caps or disable L2SG_POLICY_ENABLED. Operator keeps keys.",
   };
+  recordDecision("policy_denied");
   return {
     jsonrpc: "2.0",
     id,
@@ -156,6 +159,7 @@ function attachL2sg(
   res: JsonRpcResponse,
   meta: GuardResponseMeta
 ): JsonRpcResponse {
+  recordDecision(meta.decision);
   return { ...res, l2sg: meta };
 }
 

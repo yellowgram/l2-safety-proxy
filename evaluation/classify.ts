@@ -21,6 +21,8 @@ export function classifyDecision(meta: {
 
   if (decision === "forward") return "forward";
 
+  if (decision === "policy_denied") return "policy_denied";
+
   if (
     decision === "abort" &&
     (certainty === "definite" || code === "DEFINITE_REVERT")

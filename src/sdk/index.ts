@@ -1,6 +1,6 @@
 /**
  * Client SDK — point wallets / agents at the L2 Send Guard proxy.
- * See ./README.md for viem + ethers v6 usage.
+ * See ./README.md for viem + ethers v6 + AgentKit usage.
  */
 export {
   GUARD_CHAIN_HEADER,
@@ -12,3 +12,20 @@ export {
   type GuardProviderOptions,
   type GuardConnection,
 } from "./provider.js";
+
+export {
+  ERR_DEFINITE_REVERT,
+  ERR_POLICY_DENIED,
+  ERR_STRICT_UNCERTAIN,
+  ERR_UNSIGNED_SEND_REFUSED,
+  guardErrorCode,
+  guardErrorData,
+  isDefiniteRevertError,
+  isPolicyDeniedError,
+  isStrictUncertainError,
+  isUnsignedSendRefusedError,
+  isGuardAbortError,
+  classifyGuardError,
+  type GuardRpcErrorLike,
+  type GuardErrorKind,
+} from "./errors.js";
