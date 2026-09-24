@@ -8,6 +8,8 @@ Wallets, agent infrastructure, and Orbit/OP operators can pay gas and absorb sup
 
 The product is not key custody, an indexer, an RPC replacement, or a promise that simulation equals on-chain truth. Signing remains with the wallet, KMS, or agent.
 
+**Layer 2 (optional):** address/spend policy (allowlist, native caps, optional notify-on-deny) sits *beside* simulation — it answers whether a destination should receive funds at all. Default off; policy denials are definite stops, not fail-open. It is not a Safe-enterprise policy engine. Docs language only — do not expand Soft WTP outreach from this paragraph.
+
 ## What to demo
 
 Use a short, reproducible public-testnet demo with no secrets or broadcast requirement:

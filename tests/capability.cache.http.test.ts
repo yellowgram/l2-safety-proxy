@@ -10,6 +10,7 @@ import { FAKE_RAW } from "./fixtures.js";
 import { encodeErrorResult } from "viem";
 import { COMMON_ERRORS_ABI } from "../src/decode/revert.js";
 import { ERR_DEFINITE_REVERT } from "../src/types/index.js";
+import { defaultSpendPolicy } from "../src/policy/index.js";
 
 /**
  * HTTP-level re-smoke of the capability-cache path:
@@ -133,6 +134,7 @@ describe("capability-cache HTTP path", () => {
       listenPort: 0,
       guardMode: "open",
       failOpen: true,
+    policy: defaultSpendPolicy(),
       defaultChain: "base-sepolia",
       chains: {
         "base-sepolia": {

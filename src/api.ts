@@ -7,3 +7,5 @@ export { createServer, listen } from "./proxy/server.js";
 export * from "./types/index.js";
 export * from "./sdk/index.js";
 export * from "./agent/index.js";
+
+export * from "./policy/index.js";

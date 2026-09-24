@@ -5,6 +5,7 @@ import type { GuardConfig } from "../src/types/index.js";
 import { encodeErrorResult } from "viem";
 import { COMMON_ERRORS_ABI } from "../src/decode/revert.js";
 import { FAKE_RAW } from "./fixtures.js";
+import { defaultSpendPolicy } from "../src/policy/index.js";
 
 /**
  * Mocked integration: fake upstream RPC + real HTTP proxy server.
@@ -83,6 +84,7 @@ describe("mocked HTTP integration", () => {
       listenPort: 0,
       guardMode: "open",
       failOpen: true,
+    policy: defaultSpendPolicy(),
       defaultChain: "arb-sepolia",
       chains: {
         "arb-sepolia": {
@@ -148,6 +150,7 @@ describe("mocked HTTP integration", () => {
       listenPort: 0,
       guardMode: "open",
       failOpen: true,
+    policy: defaultSpendPolicy(),
       defaultChain: "arb-sepolia",
       chains: {
         "arb-sepolia": {
@@ -195,6 +198,7 @@ describe("mocked HTTP integration", () => {
       listenPort: 0,
       guardMode: "open",
       failOpen: true,
+    policy: defaultSpendPolicy(),
       defaultChain: "base-sepolia",
       chains: {
         "base-sepolia": {
