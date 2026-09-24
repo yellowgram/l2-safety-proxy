@@ -7,12 +7,14 @@ import {
   methodConfidence,
 } from "../src/types/index.js";
 import { FAKE_RAW as RAW } from "./fixtures.js";
+import { defaultSpendPolicy } from "../src/policy/index.js";
 
 const base = (mode: "open" | "strict"): GuardConfig => ({
   listenHost: "127.0.0.1",
   listenPort: 8545,
   guardMode: mode,
   failOpen: mode === "open",
+    policy: defaultSpendPolicy(),
   defaultChain: "arb-sepolia",
   chains: {
     "arb-sepolia": {

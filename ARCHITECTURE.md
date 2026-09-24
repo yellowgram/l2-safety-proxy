@@ -18,21 +18,24 @@ It is **not** a general RPC cloud, indexer, MEV product, or key custodian.
 Wallet / bot / agent
         │  JSON-RPC (eth_sendRawTransaction)
         ▼
-┌───────────────────────┐
-│   L2 Send Guard       │
-│  1. select chain      │  (env + x-l2sg-chain header)
-│  2. parse + recover   │
-│  3. simulate          │
-│     ├ eth_simulateV1  │  preferred when available
-│     └ eth_call        │  documented fallback
-│  4. classify          │
-│     ├ definite revert → JSON-RPC error -32080 (abort)
-│     ├ success         → forward upstream
-│     └ uncertain       → fail-open forward (default)
-└───────────┬───────────┘
-            ▼
-   Existing upstream RPC
+┌─────────────────────────────────────┐
+│   L2 Send Guard                     │
+│  1. select chain                    │  (env + x-l2sg-chain header)
+│  2. parse signed raw (no keys)      │
+│  3. Layer 2 policy (if enabled)     │  address/spend — default OFF
+│     ├ outside policy → -32083 STOP  │  (never fail-open)
+│     └ within policy  → continue     │
+│  4. Layer 1 simulate                │
+│     ├ eth_simulateV1 / eth_call     │
+│     ├ definite revert → -32080      │
+│     ├ success         → forward     │
+│     └ uncertain       → fail-open / strict (-32082)
+└───────────────┬─────────────────────┘
+                ▼
+        Existing upstream RPC
 ```
+
+**Why policy before sim:** denials are local and deterministic; skip upstream sim cost and avoid leaking denied destinations to the sim node.
 
 ## Confidence model
 
@@ -70,6 +73,30 @@ Day-one config templates:
 
 Select chain per request via `x-l2sg-chain: arb-sepolia` (or numeric chain id). This is explicitly **not** OP-only.
 
+
+## Layer 1 vs Layer 2
+
+| Layer | Question | On deny / uncertain | Default |
+| --- | --- | --- | --- |
+| **1 — Simulation** | Will this raw tx definitely revert? | Definite revert → `-32080` abort. Uncertain → **fail-open** (or strict `-32082`) | ON |
+| **2 — Address/spend policy** | Should this address get money / be called at all? | Outside policy → `-32083` `policy_denied` **STOP** (never fail-open) | **OFF** |
+
+### What Layer 2 is
+
+- Optional config-driven **allowlist**, **per-destination / global native wei caps**, optional `requireApproval` + fire-and-forget notify hook.
+- Within policy (after Layer 1 pass) = auto forward.
+- Outside policy = STOP; operator keeps keys and updates config.
+- Best-effort ERC20 `transfer` / `transferFrom` **recipient** allowlist check (no ERC20 amount caps).
+
+### What Layer 2 is not
+
+- Not a Safe / enterprise policy engine, not ERC-7579 session keys, not on-chain enforcement.
+- Not rolling daily aggregates, drip detection, or token-decimals accounting.
+- Not key custody or a blocking human-approval server.
+- Does **not** change Layer 1 fail-open semantics for simulation uncertainty.
+
+Enable via `L2SG_POLICY_ENABLED=true` and/or `L2SG_POLICY_FILE` (see `policy.example.json`).
+
 ## Threat model (M1)
 
 | Threat | Mitigation |
@@ -93,7 +120,7 @@ Select chain per request via `x-l2sg-chain: arb-sepolia` (or numeric chain id). 
 
 ## Out of scope (M1)
 
-Hosted SaaS, billing, indexing, MEV, tokens, private-key custody, Safe-enterprise policy engines.
+Hosted SaaS, billing, indexing, MEV, private-key custody, Safe-enterprise / ERC-7579 policy engines (Layer 2 stays thin allowlist+caps only).
 
 ## Package layout
 
@@ -104,6 +131,7 @@ src/
   sim/        eth_simulateV1 + eth_call + tx parse + capability cache
   proxy/      HTTP JSON-RPC server + intercept handler
   sdk/        thin viem / ethers v6 provider helpers (no key custody)
+  policy/     Layer 2 address/spend policy (default off)
   types/      shared types
 scripts/      mocked latency bench (`npm run bench`)
 tests/        unit + mocked integration (no secrets)

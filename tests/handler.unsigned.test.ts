@@ -2,12 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import { handleRequest } from "../src/proxy/handler.js";
 import type { GuardConfig } from "../src/types/index.js";
 import { ERR_UNSIGNED_SEND_REFUSED } from "../src/types/index.js";
+import { defaultSpendPolicy } from "../src/policy/index.js";
 
 const config = (): GuardConfig => ({
   listenHost: "127.0.0.1",
   listenPort: 8545,
   guardMode: "open",
   failOpen: true,
+    policy: defaultSpendPolicy(),
   defaultChain: "op-sepolia",
   chains: {
     "op-sepolia": {

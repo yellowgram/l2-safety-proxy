@@ -1,3 +1,4 @@
+import type { SpendPolicyConfig } from "../policy/types.js";
 /** Certainty that a simulation result reflects on-chain truth. */
 export type Certainty = "definite" | "uncertain";
 
@@ -20,7 +21,7 @@ export type SimMethod =
 export type GuardMode = "open" | "strict";
 
 /** Decision taken by the guard for a send. */
-export type GuardDecision = "abort" | "fail_open" | "forward";
+export type GuardDecision = "abort" | "fail_open" | "forward" | "policy_denied";
 
 export interface SimSuccess {
   ok: true;
@@ -73,6 +74,8 @@ export interface GuardConfig {
   guardMode: GuardMode;
   /** Derived: true iff guardMode === "open". Kept for callers/tests. */
   failOpen: boolean;
+  /** Layer 2 address/spend policy (default enabled=false). */
+  policy: SpendPolicyConfig;
 }
 
 /** Guard metadata attached to every send abort / fail_open / forward. */
@@ -96,6 +99,12 @@ export interface GuardResponseMeta {
   rawData?: `0x${string}`;
   aborted?: boolean;
   failOpen?: boolean;
+  /** 1 = simulation, 2 = spend policy */
+  layer?: 1 | 2;
+  policyCode?: string;
+  to?: `0x${string}`;
+  value?: `0x${string}`;
+  hint?: string;
 }
 
 export interface JsonRpcRequest {
@@ -142,6 +151,9 @@ export const ERR_UNSIGNED_SEND_REFUSED = -32081;
 
 /** Custom error code: strict-mode abort on uncertain / missing sim */
 export const ERR_STRICT_UNCERTAIN = -32082;
+
+/** Custom error code: Layer 2 address/spend policy denied (definite stop, not fail-open) */
+export const ERR_POLICY_DENIED = -32083;
 
 /** Map internal SimMethod → response confidence provenance. */
 export function methodConfidence(method: SimMethod): MethodConfidence {
