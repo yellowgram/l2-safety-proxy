@@ -7,7 +7,7 @@ Synthetic corpus + runner for L2 Send Guard decision classes. **No live broadcas
 | | |
 | --- | --- |
 | **Path** | `evaluation/fixtures/corpus.jsonl` |
-| **Size** | 300 fixtures (band 200–500) |
+| **Size** | ~340 fixtures (band 200–500; includes Layer 2 `policy_denied`) |
 | **Source** | Deterministic generator: `npm run eval:generate` |
 
 Decision classes (weekly METRICS):

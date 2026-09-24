@@ -95,7 +95,20 @@ Select chain per request via `x-l2sg-chain: arb-sepolia` (or numeric chain id). 
 - Not key custody or a blocking human-approval server.
 - Does **not** change Layer 1 fail-open semantics for simulation uncertainty.
 
-Enable via `L2SG_POLICY_ENABLED=true` and/or `L2SG_POLICY_FILE` (see `policy.example.json`).
+### Residual bypasses (honesty)
+
+Even with Layer 2 **ON**, these paths can move value or authority **without** the allowlisted “final” destination appearing as `tx.to`:
+
+| Pattern | Why allowlist alone is incomplete |
+| --- | --- |
+| `approve` / `setApprovalForAll` | Spender later pulls tokens; Guard does not denylist selectors by default |
+| **Permit2** / signature permits | Off-chain permit + later spend; not fully modeled in thin policy |
+| **Multicall** / aggregators / routers | `tx.to` is the router; inner targets are in calldata — we do **not** unwind |
+| Eth sent to a contract that forwards | Native `to` is allowlisted; onward calls are out of scope |
+
+Document these to operators; do not claim “policy ON = safe agent.” Optional future selector denylist stays **OFF-by-default** (see feature-addon backlog).
+
+Enable via `L2SG_POLICY_ENABLED=true` and/or `L2SG_POLICY_FILE` (see `policy.example.json`, `policy.agent.example.json`).
 
 ## Threat model (M1)
 
@@ -117,6 +130,8 @@ Enable via `L2SG_POLICY_ENABLED=true` and/or `L2SG_POLICY_FILE` (see `policy.exa
 | **Tenderly** | Full simulation DevOps suite (paid, heavy). We are a **thin fail-open RPC middleware** for wallets/bots/agents that already have an RPC. |
 | **eRPC** | Multi-upstream reliability/cache proxy. **Complementary** — place Send Guard in front of eRPC (or any RPC). Do not rebuild failover/indexing. |
 | **Alchemy / QuickNode** | Managed RPC clouds. We sit in front; we do not replace them. |
+| **CDP Policy Engine** | Hosted allowlist / ethValue for CDP wallets. **Complement** — Guard adds Layer 1 sim + self-hosted Layer 2 for local-sign paths. We do not replace CDP. |
+| **Agent Control–style hosted policy** | Policy/approval UX. Differentiator: Guard = sim + thin policy self-hosted JSON-RPC. See [docs/COMPETITIVE.md](./docs/COMPETITIVE.md). |
 
 ## Out of scope (M1)
 
@@ -130,7 +145,8 @@ src/
   decode/     revert decoding
   sim/        eth_simulateV1 + eth_call + tx parse + capability cache
   proxy/      HTTP JSON-RPC server + intercept handler
-  sdk/        thin viem / ethers v6 provider helpers (no key custody)
+  sdk/        viem / ethers helpers + typed -32080/-32083 errors (no key custody)
+  agent/      check() dry-run API
   policy/     Layer 2 address/spend policy (default off)
   types/      shared types
 scripts/      mocked latency bench (`npm run bench`)

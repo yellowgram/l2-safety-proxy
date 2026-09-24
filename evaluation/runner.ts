@@ -29,6 +29,7 @@ const DECISION_CLASSES: DecisionClass[] = [
   "probable",
   "forward",
   "infra_abort",
+  "policy_denied",
 ];
 
 function etStamp(): string {
@@ -79,12 +80,19 @@ function buildConfig(fixture: EvalFixture): GuardConfig {
         ? "base"
         : "op-stack") as "arbitrum" | "base" | "op-stack",
   };
+  const policy = defaultSpendPolicy();
+  if (fixture.policyAllowlist !== undefined) {
+    policy.enabled = true;
+    policy.destinations = new Map(
+      fixture.policyAllowlist.map((a) => [a.toLowerCase(), {}])
+    );
+  }
   return {
     listenHost: "127.0.0.1",
     listenPort: 0,
     guardMode: fixture.guardMode,
     failOpen: fixture.guardMode === "open",
-    policy: defaultSpendPolicy(),
+    policy,
     defaultChain: fixture.chainKey,
     chains: { [fixture.chainKey]: chain },
   };

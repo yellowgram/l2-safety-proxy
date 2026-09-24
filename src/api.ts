@@ -9,3 +9,4 @@ export * from "./sdk/index.js";
 export * from "./agent/index.js";
 
 export * from "./policy/index.js";
+export { getDecisionCounters, resetDecisionCounters, type DecisionCounters } from "./proxy/counters.js";

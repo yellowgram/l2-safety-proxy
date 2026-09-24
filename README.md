@@ -38,10 +38,11 @@ curl -s http://127.0.0.1:8545/health
 
 ```bash
 npm run build
+npm run demo:dual-layer   # offline: -32080 revert abort AND -32083 policy stop
 npm run demo:sepolia
 npm run demo:delta-a   # Base Sepolia abort + faucet attempts (needs .env burner)
 npm run agent:loop     # ≥100 offline agent decisions → docs/agent-decisions.jsonl
-# Offline (no network): npm run demo:offline
+# Offline Layer 1 only: npm run demo:offline
 ```
 
 Expect: **known-revert → abort** with `confidence` + decoded reason; **known-success → forward** when the signer has Sepolia ETH (set `DEMO_PRIVATE_KEY` or use a faucet; if faucet blocks, the script logs and stops that slice).
@@ -69,6 +70,8 @@ Simulating a send catches definite failures. It does **not** answer “should th
 
 Layer 1 uncertain → still fail-open (or strict). Layer 2 deny → always definite stop. Operator keeps keys.
 
+**Honesty:** Layer 2 allowlist does **not** unwind `approve` / `setApprovalForAll` / Permit2 / multicall router calldata. Allowlisting a router ≠ destination safety. See [ARCHITECTURE.md](./ARCHITECTURE.md#what-layer-2-is-not).
+
 ## Confidence (response field)
 
 Every abort / fail_open / forward response includes:
@@ -87,6 +90,27 @@ Success / fail-open forwards attach metadata on JSON-RPC extension `l2sg`; abort
 
 Send decisions: [docs/SEND_LOG.md](./docs/SEND_LOG.md). Architecture: [ARCHITECTURE.md](./ARCHITECTURE.md).
 
+
+## Agent drop-in (viem / AgentKit)
+
+Point your wallet client’s HTTP transport at the proxy — signing stays local (no custody):
+
+```ts
+import { http } from "viem";
+import { viemHttpArgs, isPolicyDeniedError } from "l2-send-guard/sdk";
+
+const transport = http(
+  ...viemHttpArgs({ proxyUrl: "http://127.0.0.1:8545", chain: "base-sepolia" })
+);
+```
+
+Full example: [`examples/agentkit-viem.ts`](./examples/agentkit-viem.ts).  
+Agent policy template: [`policy.agent.example.json`](./policy.agent.example.json).  
+*Sim ≠ policy* positioning: [`docs/COMPETITIVE.md`](./docs/COMPETITIVE.md).
+
+## Paid support (optional)
+
+OSS core stays free. Fixed SKUs (AgentKit wire-up, policy pack review, priority retainer): [`SUPPORT.md`](./SUPPORT.md).
 
 ## Client probes
 
