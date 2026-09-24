@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Hex } from "viem";
 import { check, checkWithConfig } from "../src/agent/check.js";
 import type { ChainConfig, GuardConfig, SimResult } from "../src/types/index.js";
+import { defaultSpendPolicy } from "../src/policy/index.js";
 
 const RAW =
   "0x02f86d83066eee80843b9aca00843b9aca008252089400000000000000000000000000000000000000018080c001a07eade7c743ff2ea60f61c687ccca4b77553a14de08378371ac40c7d52a8f1d74a06fed4faa592ac84bae32b9311844176fc059eb70057c18450d4310072a880629" as Hex;
@@ -96,6 +97,7 @@ describe("agent check()", () => {
       defaultChain: "base-sepolia",
       guardMode: "open",
       failOpen: true,
+    policy: defaultSpendPolicy(),
       chains: { "base-sepolia": chain },
     };
     const r = await checkWithConfig(RAW, config, "base-sepolia", {

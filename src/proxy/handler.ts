@@ -10,6 +10,7 @@ import type {
 } from "../types/index.js";
 import {
   ERR_DEFINITE_REVERT,
+  ERR_POLICY_DENIED,
   ERR_STRICT_UNCERTAIN,
   ERR_UNSIGNED_SEND_REFUSED,
   SEND_METHODS,
@@ -17,8 +18,10 @@ import {
   methodConfidence,
 } from "../types/index.js";
 import { decodeRevertData } from "../decode/revert.js";
+import { evaluateSpendPolicy, notifyPolicyDenied } from "../policy/index.js";
 import { forwardRaw } from "../sim/rpcClient.js";
 import { simulateRawTransaction } from "../sim/simulator.js";
+import { parseRawTransaction } from "../sim/txParse.js";
 
 export type SimulateFn = (
   chain: ChainConfig,
@@ -39,19 +42,19 @@ function resolveChain(
   config: GuardConfig,
   req: JsonRpcRequest,
   headers?: Headers
-): ChainConfig {
+): { chain: ChainConfig; chainKey: string } {
   const headerKey =
     headers?.get("x-l2sg-chain") ?? headers?.get("x-chain-id");
   const key = headerKey?.trim() || config.defaultChain;
   const chain = config.chains[key];
   if (!chain) {
-    const byId = Object.values(config.chains).find(
-      (c) => String(c.chainId) === key
+    const entry = Object.entries(config.chains).find(
+      ([, c]) => String(c.chainId) === key
     );
-    if (byId) return byId;
+    if (entry) return { chain: entry[1], chainKey: entry[0] };
     throw new Error(`unknown chain '${key}'`);
   }
-  return chain;
+  return { chain, chainKey: key };
 }
 
 function buildMeta(
@@ -67,6 +70,7 @@ function buildMeta(
     certainty: sim.confidence,
     chainId: chain.chainId,
     simMethod: sim.method,
+    layer: 1,
     ...extras,
   };
   if (!sim.ok) {
@@ -110,6 +114,44 @@ function abortResponse(
   };
 }
 
+function policyDeniedResponse(
+  id: JsonRpcRequest["id"],
+  chain: ChainConfig,
+  opts: {
+    reason: string;
+    policyCode: string;
+    to?: `0x${string}`;
+    valueWei: bigint;
+  }
+): JsonRpcResponse {
+  const meta: GuardResponseMeta = {
+    l2SendGuard: true,
+    decision: "policy_denied",
+    confidence: "unknown",
+    certainty: "definite",
+    chainId: chain.chainId,
+    simMethod: "unavailable",
+    layer: 2,
+    aborted: true,
+    failOpen: false,
+    reason: opts.reason,
+    code: opts.policyCode,
+    policyCode: opts.policyCode,
+    ...(opts.to ? { to: opts.to } : {}),
+    value: `0x${opts.valueWei.toString(16)}` as `0x${string}`,
+    hint: "Update Layer 2 policy allowlist/caps or disable L2SG_POLICY_ENABLED. Operator keeps keys.",
+  };
+  return {
+    jsonrpc: "2.0",
+    id,
+    error: {
+      code: ERR_POLICY_DENIED,
+      message: `L2 Send Guard: policy_denied — ${opts.reason}`,
+      data: meta,
+    },
+  };
+}
+
 function attachL2sg(
   res: JsonRpcResponse,
   meta: GuardResponseMeta
@@ -118,11 +160,11 @@ function attachL2sg(
 }
 
 /**
- * Core middleware: intercept send methods → simulate → abort or fail-open.
- * All other methods are forwarded untouched.
+ * Core middleware:
+ * parse → Layer 2 policy (if enabled) → Layer 1 simulate → abort or fail-open/forward.
  *
- * GUARD_MODE=open (default): uncertain → fail_open forward.
- * GUARD_MODE=strict: uncertain / missing / unknown → abort.
+ * Layer 2 denials are definite stops (-32083), never fail-open.
+ * GUARD_MODE only affects Layer 1 simulation uncertainty.
  */
 export async function handleRequest(
   config: GuardConfig,
@@ -139,8 +181,9 @@ export async function handleRequest(
     });
 
   let chain: ChainConfig;
+  let chainKey: string;
   try {
-    chain = resolveChain(config, req, headers);
+    ({ chain, chainKey } = resolveChain(config, req, headers));
   } catch (err) {
     return {
       jsonrpc: "2.0",
@@ -186,6 +229,38 @@ export async function handleRequest(
         message: "invalid params: expected hex raw transaction",
       },
     };
+  }
+
+  // Layer 2: parse → policy (before sim). Unparseable txs skip policy and use Layer 1 path.
+  const policy = config.policy;
+  if (policy?.enabled) {
+    try {
+      const parsed = parseRawTransaction(raw as Hex);
+      const check = evaluateSpendPolicy(policy, {
+        chainKey,
+        chainId: chain.chainId,
+        to: parsed.to,
+        value: parsed.value,
+        data: parsed.data,
+      });
+      if (!check.allow) {
+        notifyPolicyDenied(policy, {
+          chainKey,
+          chainId: chain.chainId,
+          to: parsed.to,
+          value: parsed.value,
+          data: parsed.data,
+        }, check);
+        return policyDeniedResponse(req.id, chain, {
+          reason: check.reason ?? "policy denied",
+          policyCode: check.code ?? "DESTINATION_NOT_ALLOWLISTED",
+          to: check.effectiveTo ?? parsed.to,
+          valueWei: check.valueWei,
+        });
+      }
+    } catch {
+      // parse failure → fall through to simulate (uncertain / fail-open semantics)
+    }
   }
 
   let sim: SimResult;
