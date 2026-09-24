@@ -72,10 +72,18 @@ Best first proof — **no public RPC, no keys, no broadcast**:
 
 ```bash
 npm run build
-node scripts/demo-offline.mjs
+npm run demo:dual-layer    # -32080 + -32083
+node scripts/demo-offline.mjs   # Layer 1 abort + fail-open only
 ```
 
-Expected summary:
+Dual-layer expected summary:
+
+```text
+-32080 definite-revert abort: PASS
+-32083 policy_denied stop:    PASS
+```
+
+Layer-1-only offline expected summary:
 
 ```text
 definite-revert abort: PASS   # JSON-RPC -32080, aborted:true, upstream sends: 0

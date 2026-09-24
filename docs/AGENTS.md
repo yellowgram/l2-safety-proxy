@@ -34,7 +34,7 @@ Unlocking accounts / node-held keys is out of scope. Do not point an unlocked ge
 
 ## Health
 
-`GET /health` lists enabled chains (`arb-sepolia`, `op-sepolia`, `base-sepolia` by default), `chainDetails`, and which submit methods are accepted vs refused.
+`GET /health` lists enabled chains (`arb-sepolia`, `op-sepolia`, `base-sepolia` by default), `chainDetails`, submit methods accepted vs refused, **`policy`** summary (`enabled`, `destinationCount` — **no addresses**), and process-lifetime **`decisions`** counters (`abort` / `fail_open` / `forward` / `policy_denied`).
 
 
 ## Thin `check()` API (Delta C)
@@ -55,3 +55,14 @@ npm run agent:loop
 ## Layer 2 (optional)
 
 If `L2SG_POLICY_ENABLED` / policy file is on, address/spend allowlist+caps run **before** sim. Denials are `-32083` / `policy_denied` (not fail-open). `checkWithConfig` applies `config.policy` the same way. Default off.
+
+
+## AgentKit / viem wrapper
+
+```bash
+npm run demo:dual-layer   # offline proof: -32080 + -32083
+```
+
+Wire-up example: [`examples/agentkit-viem.ts`](../examples/agentkit-viem.ts).  
+SDK: [`src/sdk/README.md`](../src/sdk/README.md).  
+Competitive note: [`docs/COMPETITIVE.md`](./COMPETITIVE.md).

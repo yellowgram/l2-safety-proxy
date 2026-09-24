@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "allowContractCreation": false,
+  "allowAnyDestination": false,
+  "globalMaxNativeWei": "50000000000000000",
+  "destinations": {
+    "0x1111111111111111111111111111111111111111": {
+      "maxNativeWei": "25000000000000000"
+    },
+    "0x2222222222222222222222222222222222222222": {
+      "maxNativeWei": "10000000000000000",
+      "requireApproval": true
+    }
+  },
+  "erc20RecipientCheck": true,
+  "humanGate": {
+    "mode": "stop",
+    "notifyUrl": "http://127.0.0.1:9999/policy-denied"
+  },
+  "_comment": "Agent-wallet template: tight allowlist + native caps + notify-on-deny. Copy → policy.json and replace destinations with your agent-allowed contracts/EOAs. Layer 2 default remains OFF until L2SG_POLICY_ENABLED=true. Residual bypasses (approve/Permit2/multicall) — see ARCHITECTURE.md."
+}
