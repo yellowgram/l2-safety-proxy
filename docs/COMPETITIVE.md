@@ -36,4 +36,8 @@ npm test && npm run build
 npm run demo:dual-layer   # offline: -32080 + -32083
 ```
 
-Agent wiring: [`examples/agentkit-viem.ts`](../examples/agentkit-viem.ts), [`src/sdk/README.md`](../src/sdk/README.md). Paid help (optional): [`SUPPORT.md`](../SUPPORT.md).
+Full inbound pack (commands + expected PASS transcript): [`INBOUND_DEMO.md`](./INBOUND_DEMO.md).
+
+Agent wiring: [`examples/agentkit-viem.ts`](../examples/agentkit-viem.ts), [`src/sdk/README.md`](../src/sdk/README.md).
+
+**Paid help (optional):** fixed SKUs and how to reply — [`SUPPORT.md`](../SUPPORT.md). Pilot blanks: [`PILOT_SOW.md`](./PILOT_SOW.md). OSS core stays free; no fake checkout URLs.

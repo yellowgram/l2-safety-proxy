@@ -2,7 +2,13 @@
 
 **L2 Send Guard stays MIT / free to run.** Core simulation, fail-open semantics, and optional Layer 2 policy are not paywalled. This page is for teams that want **fixed-scope help** or **priority triage**.
 
-Community (free): GitHub Issues & Discussions on [yellowgram/l2-safety-proxy](https://github.com/yellowgram/l2-safety-proxy). No SLA.
+**Try before you buy:** [`docs/INBOUND_DEMO.md`](./docs/INBOUND_DEMO.md) — `npm test` / `npm run build` / `npm run demo:dual-layer`, how to read `-32080` / `-32083`, expected PASS transcript.
+
+Community (free): GitHub **Issues** & **Discussions** on [yellowgram/l2-safety-proxy](https://github.com/yellowgram/l2-safety-proxy). No SLA.
+
+**Contact for paid SKUs:** reply on GitHub Issues / Discussions (title `support: <SKU>`), **or** email `CONTACT_EMAIL_TBA` when the founder publishes an address. Do not invent founder contact details from this repo.
+
+Sim ≠ policy positioning: [`docs/COMPETITIVE.md`](./docs/COMPETITIVE.md). Income kill clock (internal): [`docs/INCOME_GATE.md`](./docs/INCOME_GATE.md).
 
 ---
 
@@ -14,7 +20,7 @@ Community (free): GitHub Issues & Discussions on [yellowgram/l2-safety-proxy](ht
 | **Policy pack review** | Review of your Layer 2 JSON (allowlist, native caps, notify hook); bypass honesty checklist (approve / Permit2 / multicall); written residual risks — **no** Safe-clone redesign | **$600** | **1–2 days** |
 | **Priority triage retainer** | Slack/email triage queue for Guard runtime questions; best-effort same-business-day reply on regressions you can repro offline | **$800 / month** | Monthly |
 
-Prices are **public list** in USD. **INR / USDT / Wise:** contact for a quote (founder commonly invoices INR for India-based buyers; international buyers often USD or USDT). Indicative INR guidance for the founder is kept off this public page so rates can move with FX.
+Prices are **public list** in USD. Currency / settlement (INR / USDT / Wise / other) is chosen **on the invoice** after scope is confirmed — not advertised as fake checkout links in this repo.
 
 Custom pilots: start from [`docs/PILOT_SOW.md`](./docs/PILOT_SOW.md) (blanks for deliverables / success metrics / price).
 
@@ -34,16 +40,19 @@ We will **not** charge for access to core middleware features.
 
 ## How to buy (invoice path)
 
-1. Email or GitHub: open an issue titled `support: <SKU>` **or** email the address listed on the GitHub org/profile (prefer GitHub if unsure).  
-2. Confirm SKU + scope in writing (use PILOT_SOW for multi-day pilots).  
-3. Receive an invoice with **one** of:
-   - **USDT** (network + address on invoice — no public payment link here)
-   - **Wise** (business details on invoice)
-   - **Razorpay international** / card link **issued on the invoice** (placeholder until issued — **no fake checkout URLs in this repo**)
+1. **Inbound only:** open a GitHub Issue / Discussion titled `support: <SKU>`, **or** email `CONTACT_EMAIL_TBA` (placeholder until founder publishes).  
+2. Confirm SKU + scope in writing (use [`docs/PILOT_SOW.md`](./docs/PILOT_SOW.md) for multi-day pilots).  
+3. **Founder provides payee details on the invoice** (USDT network+address, Wise business details, Razorpay/card link, or other). CoS fills invoice fields **only after** the founder supplies them — **no** invented Wise/USDT/Razorpay details or fake checkout URLs in this repo.  
 4. Work starts after cleared payment (or written net-terms agreement).
+
+### Internal process (agents / CoS — not a customer step)
+
+1. Draft SOW from [`docs/PILOT_SOW.md`](./docs/PILOT_SOW.md) when an inbound thread exists.  
+2. **Founder sends** the SOW / invoice to the buyer.  
+3. **Never CoS cold-send** — no unsolicited SOW email, Soft WTP bumps, or invented payee details. Soft WTP freeze: do not bump AgentKit #1512.
 
 ---
 
 ## Out of scope for these SKUs
 
-Key custody · becoming your RPC cloud · Safe / Zodiac / ERC-7579 builds · Approval-Inbox product clone · grant-application writing · Soft WTP / cold outreach on your behalf.
+Key custody · becoming your RPC cloud · Safe / Zodiac / ERC-7579 builds · Approval-Inbox product clone · grant-application writing · Soft WTP / cold outreach on your behalf · hosted SaaS before the income gate ([`docs/INCOME_GATE.md`](./docs/INCOME_GATE.md)).
