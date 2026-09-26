@@ -86,6 +86,7 @@ export function loadConfig(): GuardConfig {
   }
 
   const policy = loadSpendPolicy();
+  const decisionLogPath = env("L2SG_DECISION_LOG");
 
   return {
     listenHost,
@@ -95,5 +96,6 @@ export function loadConfig(): GuardConfig {
     guardMode,
     failOpen,
     policy,
+    ...(decisionLogPath ? { decisionLogPath } : {}),
   };
 }

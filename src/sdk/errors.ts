@@ -7,9 +7,11 @@
  *   -32081  eth_sendTransaction refused (no custody)
  *   -32082  strict-mode uncertain abort (Layer 1)
  *   -32083  policy_denied (Layer 2 — never fail-open)
+ *   -32084  chain_mismatch (signed chainId ≠ selected chain)
  */
 
 import {
+  ERR_CHAIN_MISMATCH,
   ERR_DEFINITE_REVERT,
   ERR_POLICY_DENIED,
   ERR_STRICT_UNCERTAIN,
@@ -17,6 +19,7 @@ import {
 } from "../types/index.js";
 
 export {
+  ERR_CHAIN_MISMATCH,
   ERR_DEFINITE_REVERT,
   ERR_POLICY_DENIED,
   ERR_STRICT_UNCERTAIN,
@@ -35,6 +38,7 @@ export type GuardErrorKind =
   | "policy_denied"
   | "strict_uncertain"
   | "unsigned_refused"
+  | "chain_mismatch"
   | "other";
 
 function asError(err: unknown): GuardRpcErrorLike | null {
@@ -73,6 +77,10 @@ export function isUnsignedSendRefusedError(err: unknown): boolean {
   return guardErrorCode(err) === ERR_UNSIGNED_SEND_REFUSED;
 }
 
+export function isChainMismatchError(err: unknown): boolean {
+  return guardErrorCode(err) === ERR_CHAIN_MISMATCH;
+}
+
 /** True if the error is any Guard send-intercept abort (not a generic RPC failure). */
 export function isGuardAbortError(err: unknown): boolean {
   const code = guardErrorCode(err);
@@ -80,7 +88,8 @@ export function isGuardAbortError(err: unknown): boolean {
     code === ERR_DEFINITE_REVERT ||
     code === ERR_POLICY_DENIED ||
     code === ERR_STRICT_UNCERTAIN ||
-    code === ERR_UNSIGNED_SEND_REFUSED
+    code === ERR_UNSIGNED_SEND_REFUSED ||
+    code === ERR_CHAIN_MISMATCH
   );
 }
 
@@ -90,6 +99,7 @@ export function classifyGuardError(err: unknown): GuardErrorKind {
   if (code === ERR_POLICY_DENIED) return "policy_denied";
   if (code === ERR_STRICT_UNCERTAIN) return "strict_uncertain";
   if (code === ERR_UNSIGNED_SEND_REFUSED) return "unsigned_refused";
+  if (code === ERR_CHAIN_MISMATCH) return "chain_mismatch";
   return "other";
 }
 
