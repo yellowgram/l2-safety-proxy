@@ -140,7 +140,7 @@ describe("capability-cache HTTP path", () => {
         "base-sepolia": {
           id: "base-sepolia",
           name: "Base Sepolia",
-          chainId: 84532,
+          chainId: 421614,
           upstreamRpcUrl: upstream.url,
           preferSimulateV1: true,
           ecosystem: "base",

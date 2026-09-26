@@ -28,9 +28,9 @@ export interface CheckResult {
   certainty: Certainty;
   /** Simulation method provenance (simulate_v1 | eth_call | unknown) */
   simProvenance: MethodConfidence;
-  /** 1 = simulation path; 2 = spend policy */
-  layer?: 1 | 2;
-  policyCode?: string;
+  /** 1 = simulation path; 2 = spend policy; null = chain mismatch (not a layer decision) */
+  layer?: 1 | 2 | null;
+  policyCode?: string | null;
 }
 
 export interface CheckOptions {
@@ -85,28 +85,52 @@ export async function check(
   const policy = opts.policy;
   const chainKey = opts.chainKey ?? chain.id;
 
-  if (policy?.enabled) {
-    try {
-      const parsed = parseRawTransaction(rawTx);
-      const result = evaluateSpendPolicy(policy, {
-        chainKey,
-        chainId: chain.chainId,
-        to: parsed.to,
-        value: parsed.value,
-        data: parsed.data,
-      });
-      if (!result.allow) {
-        return {
-          decision: "policy_denied",
-          reason: result.reason ?? "policy denied",
-          certainty: "definite",
-          simProvenance: "unknown",
-          layer: 2,
-          policyCode: result.code,
-        };
-      }
-    } catch {
-      // unparseable → Layer 1 uncertain path
+  let parsed: ReturnType<typeof parseRawTransaction> | undefined;
+  try {
+    parsed = parseRawTransaction(rawTx);
+  } catch {
+    parsed = undefined;
+  }
+
+  if (policy?.enabled && !parsed) {
+    return {
+      decision: "policy_denied",
+      reason: "signed transaction could not be parsed; Layer 2 policy was not evaluated",
+      certainty: "definite",
+      simProvenance: "unknown",
+      layer: 2,
+      policyCode: "TX_UNPARSEABLE",
+    };
+  }
+
+  if (parsed?.tx.chainId != null && parsed.tx.chainId !== chain.chainId) {
+    return {
+      decision: "chain_mismatch",
+      reason: `signed chainId ${parsed.tx.chainId} does not match selected chain ${chain.chainId}`,
+      certainty: "definite",
+      simProvenance: "unknown",
+      layer: null,
+      policyCode: null,
+    };
+  }
+
+  if (policy?.enabled && parsed) {
+    const result = evaluateSpendPolicy(policy, {
+      chainKey,
+      chainId: chain.chainId,
+      to: parsed.to,
+      value: parsed.value,
+      data: parsed.data,
+    });
+    if (!result.allow) {
+      return {
+        decision: "policy_denied",
+        reason: result.reason ?? "policy denied",
+        certainty: "definite",
+        simProvenance: "unknown",
+        layer: 2,
+        policyCode: result.code,
+      };
     }
   }
 

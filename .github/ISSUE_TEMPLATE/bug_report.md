@@ -1,24 +1,41 @@
 ---
 name: Bug report
-about: Something broken in the proxy, sim path, or docs
+about: A defect in the proxy, simulation, policy, or docs — with an offline repro
 title: "[bug] "
 labels: bug
 ---
 
-**Environment**
-- OS / Node version:
-- Install path: npm / Docker
-- Chain key (`arb-sepolia` / `op-sepolia` / `base-sepolia`):
-- Commit SHA:
+Issues without the repro block may be closed after 14 days. No bot does that; maintainers close them by hand. How-to questions belong in Discussions.
+
+**Pin**
+- Package version or commit SHA (not `@latest`):
+- Node version:
+- OS:
+
+**Install path**
+- [ ] Human/ops (Layer 2 off)
+- [ ] Agent MSP (Layer 2 on)
+
+**Offline repro** (required)
+
+```text
+npm test:
+npm run demo:dual-layer:
+```
+
+If the offline demo cannot run, say why. Do not substitute a public Sepolia log as the only repro.
+
+**Redacted env booleans** (no URLs, no keys, no allowlist)
+
+```text
+GUARD_MODE=
+L2SG_POLICY_ENABLED=
+L2SG_HOST_IS_LOOPBACK=
+```
 
 **Expected**
 
-**Actual** (include JSON-RPC error `code` / `data.confidence` / `data.aborted` if relevant)
+**Actual** (include JSON-RPC `error.code` and `error.data.decision` / `layer` / `policyCode` when present)
 
-**Repro steps**
-1.
-2.
-
-**Safety notes**
-- Do not paste private keys, mnemonics, or funded raw txs.
-- Prefer public Sepolia + unfunded fixtures.
+**Safety**
+- Do not paste private keys, mnemonics, or funded raw transactions.

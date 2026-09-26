@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: How-to question
+    url: https://github.com/yellowgram/l2-safety-proxy/discussions
+    about: Setup, policy shape, and error-code questions belong in Discussions. Issues need an offline repro.

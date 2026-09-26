@@ -16,7 +16,9 @@ import { defaultSpendPolicy } from "../src/policy/index.js";
 const baseChain = (over: Partial<ChainConfig> = {}): ChainConfig => ({
   id: "base-sepolia",
   name: "Base Sepolia",
-  chainId: 84532,
+  // FAKE_RAW is signed for Arb Sepolia. Handler tests reject a mismatch
+  // before simulation, so this helper uses the signed chain id.
+  chainId: 421614,
   upstreamRpcUrl: "http://primary-rpc",
   preferSimulateV1: true,
   ecosystem: "base",

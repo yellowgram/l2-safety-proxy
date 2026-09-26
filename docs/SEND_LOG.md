@@ -1,5 +1,9 @@
 # Send Guard evidence log
 
+Runtime decision JSONL (what to grep in production) is specified in [DECISION_LOG.md](./DECISION_LOG.md): one JSON object per line, including `policy_denied`, `fail_open`, `abort`, and `chainId`. Set `L2SG_DECISION_LOG` to enable it. The tables below are historical evidence, not that schema.
+
+
+
 Columns: `ts` · `chain` · `mode` · `decision` · `confidence` · `txHash|simId` · `notes`
 
 **Policy:** no invented hashes. Live forward broadcast hashes require Sepolia ETH; if faucet blocks, log and stop that slice.

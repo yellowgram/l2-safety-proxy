@@ -17,5 +17,5 @@
     "mode": "stop",
     "notifyUrl": "http://127.0.0.1:9999/policy-denied"
   },
-  "_comment": "Agent-wallet template: tight allowlist + native caps + notify-on-deny. Copy → policy.json and replace destinations with your agent-allowed contracts/EOAs. Layer 2 default remains OFF until L2SG_POLICY_ENABLED=true. Residual bypasses (approve/Permit2/multicall) — see ARCHITECTURE.md."
+  "_comment": "POISON TEMPLATE. Copy to policy.json and replace 0x1111…/0x2222… before use. npm run policy:check -- policy.json must pass. Enabling this file unchanged refuses process start. Policy ON is not a safe agent — docs/RESIDUAL_BYPASSES.md."
 }

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { getAddress, parseEther } from "viem";
+import { checkPolicyDocument, listPoisonAddresses } from "./check.js";
 import {
   defaultSpendPolicy,
   type DestinationPolicy,
@@ -92,8 +93,47 @@ interface PolicyFileJson {
 }
 
 function loadFile(path: string): PolicyFileJson {
-  const text = readFileSync(path, "utf8");
-  return JSON.parse(text) as PolicyFileJson;
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (err) {
+    throw new Error(
+      `Failed to load L2SG_POLICY_FILE=${path}: ${err instanceof Error ? err.message : String(err)}. Refusing to start — policy will not silently disable.`
+    );
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(text) as unknown;
+  } catch (err) {
+    throw new Error(
+      `Invalid JSON in L2SG_POLICY_FILE=${path}: ${err instanceof Error ? err.message : String(err)}. Refusing to start.`
+    );
+  }
+  const report = checkPolicyDocument(json);
+  if (report.schemaErrors.length > 0) {
+    throw new Error(
+      `Invalid L2SG_POLICY_FILE=${path}: ${report.schemaErrors.join("; ")}. Refusing to start.`
+    );
+  }
+  return json as PolicyFileJson;
+}
+
+/**
+ * L2SG_POLICY_ENABLED=true with neither a file nor an allowlist is a misconfig.
+ * An empty file (`destinations: {}`) is an explicit deny-all and is allowed.
+ */
+function assertEnabledHasSource(): void {
+  const raw = process.env.L2SG_POLICY_ENABLED;
+  if (raw === undefined || raw === "") return;
+  const enabled = ["1", "true", "yes", "on"].includes(raw.toLowerCase());
+  if (!enabled) return;
+  const file = process.env.L2SG_POLICY_FILE;
+  const allow = process.env.L2SG_POLICY_ALLOWLIST?.trim();
+  if (!file && !allow) {
+    throw new Error(
+      "L2SG_POLICY_ENABLED=true but L2SG_POLICY_FILE is unset and L2SG_POLICY_ALLOWLIST is empty. Refusing to start — policy will not silently disable. Set L2SG_POLICY_FILE and run npm run policy:check."
+    );
+  }
 }
 
 /**
@@ -101,18 +141,12 @@ function loadFile(path: string): PolicyFileJson {
  * Default: disabled (Layer 1 only).
  */
 export function loadSpendPolicy(): SpendPolicyConfig {
+  assertEnabledHasSource();
   const policy = defaultSpendPolicy();
   const filePath = env("L2SG_POLICY_FILE");
 
   if (filePath) {
-    let file: PolicyFileJson;
-    try {
-      file = loadFile(filePath);
-    } catch (err) {
-      throw new Error(
-        `Failed to load L2SG_POLICY_FILE=${filePath}: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
+    const file = loadFile(filePath);
     if (file.enabled === true) policy.enabled = true;
     if (file.enabled === false) policy.enabled = false;
     if (file.allowContractCreation !== undefined) {
@@ -180,13 +214,23 @@ export function loadSpendPolicy(): SpendPolicyConfig {
   }
   const allowlist = env("L2SG_POLICY_ALLOWLIST");
   if (allowlist) {
+    const invalid: string[] = [];
     for (const part of allowlist.split(",")) {
       const a = part.trim();
       if (!a) continue;
+      if (!/^0x[0-9a-fA-F]{40}$/.test(a)) {
+        invalid.push(a);
+        continue;
+      }
       const key = normKey(a);
       if (!policy.destinations.has(key)) {
         policy.destinations.set(key, {});
       }
+    }
+    if (invalid.length > 0) {
+      throw new Error(
+        `L2SG_POLICY_ALLOWLIST has entries that are not 0x + 40 hex addresses: ${invalid.join(", ")}. Refusing to start.`
+      );
     }
   }
   const notify = env("L2SG_POLICY_NOTIFY_URL");
@@ -194,7 +238,22 @@ export function loadSpendPolicy(): SpendPolicyConfig {
     policy.humanGate = { mode: "stop", notifyUrl: notify };
   }
 
-  // Presence of file with enabled, or allowlist/env enable, activates.
-  // If file path set but enabled never true and env not set → stay false unless file said true.
+  if (policy.enabled) {
+    const fenceOpen =
+      policy.allowAnyDestination ||
+      Object.values(policy.chains).some((overlay) => overlay.allowAnyDestination === true);
+    if (fenceOpen) {
+      throw new Error(
+        "Refusing to start: Layer 2 policy is enabled and allowAnyDestination=true (file, chain overlay, or L2SG_POLICY_ALLOW_ANY). That removes the destination fence. Set it false and run npm run policy:check."
+      );
+    }
+    const poisons = listPoisonAddresses(policy);
+    if (poisons.length > 0) {
+      throw new Error(
+        `Refusing to start: Layer 2 policy is enabled and still contains placeholder destination(s): ${poisons.join(", ")}. Replace 0x1111…/0x2222… style addresses and run npm run policy:check. Policy will not silently disable.`
+      );
+    }
+  }
+
   return policy;
 }
