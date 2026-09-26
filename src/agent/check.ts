@@ -30,7 +30,7 @@ export interface CheckResult {
   simProvenance: MethodConfidence;
   /** 1 = simulation path; 2 = spend policy; null = chain mismatch (not a layer decision) */
   layer?: 1 | 2 | null;
-  policyCode?: string;
+  policyCode?: string | null;
 }
 
 export interface CheckOptions {
@@ -92,6 +92,17 @@ export async function check(
     parsed = undefined;
   }
 
+  if (policy?.enabled && !parsed) {
+    return {
+      decision: "policy_denied",
+      reason: "signed transaction could not be parsed; Layer 2 policy was not evaluated",
+      certainty: "definite",
+      simProvenance: "unknown",
+      layer: 2,
+      policyCode: "TX_UNPARSEABLE",
+    };
+  }
+
   if (parsed?.tx.chainId != null && parsed.tx.chainId !== chain.chainId) {
     return {
       decision: "chain_mismatch",
@@ -99,6 +110,7 @@ export async function check(
       certainty: "definite",
       simProvenance: "unknown",
       layer: null,
+      policyCode: null,
     };
   }
 

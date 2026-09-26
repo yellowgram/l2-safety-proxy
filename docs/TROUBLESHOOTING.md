@@ -32,11 +32,19 @@ Public testnet RPC weather is your upstream, not a Guard bug. CI does not call p
 
 **Symptom:** process exits at start, or `npm run policy:check -- ./policy.json` exits 1.
 
-**What happened:** Policy files are JSON. Comments (`//`) are invalid. Placeholder addresses `0x1111…` / `0x2222…` (any repeated non-zero nibble) fail `policy:check` and, when policy is enabled, refuse start. `allowAnyDestination: true` fails `policy:check`.
+**What happened:** Policy files are JSON. Comments (`//`) are invalid. Placeholder addresses `0x1111…` / `0x2222…` (any repeated non-zero nibble) fail `policy:check` and, when policy is enabled, refuse start. `allowAnyDestination: true` fails `policy:check` when the file has `enabled: true`, and process start refuses it whenever the merged config is enabled (file, chain overlay, or `L2SG_POLICY_ALLOW_ANY`). `policy:check` reads the file only. Env overrides are applied at start.
 
-**Check:** `npm run policy:check -- ./policy.json` until it prints `policy:check OK`.
+**Check:** `npm run policy:check -- ./policy.json` until it prints `policy:check OK`. Then start the process. A file that passes with `enabled: false` can still be refused if `L2SG_POLICY_ENABLED=true` turns on `allowAnyDestination` or leaves a placeholder in the merged allowlist.
 
-## 5. `GUARD_MODE` vs `L2SG_FAIL_OPEN`
+## 5. Policy on, raw tx does not parse
+
+**Symptom:** `-32083` with `policyCode: TX_UNPARSEABLE`.
+
+**What happened:** Layer 2 cannot evaluate a transaction it cannot parse, so it does not fall through to simulation or fail-open. The code stays `-32083` so an agent halt on policy deny also stops this case. Policy off does not use this path.
+
+**Check:** the client sent `eth_sendRawTransaction` with a signed raw tx. Do not retry the same bytes.
+
+## 6. `GUARD_MODE` vs `L2SG_FAIL_OPEN`
 
 **Symptom:** uncertain sims abort, or the opposite of what you set.
 

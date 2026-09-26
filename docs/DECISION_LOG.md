@@ -27,7 +27,7 @@ Grep the file for `policy_denied`, `fail_open`, `abort`, `chain_mismatch`, or `u
 | `chainId` | Selected chain (header or default) |
 | `chainKey` | Template key (`arb-sepolia`, `op-sepolia`, `base-sepolia`) |
 | `layer` | `1` simulation, `2` policy, `null` otherwise |
-| `policyCode` | Layer 2 code such as `DESTINATION_NOT_ALLOWLISTED`, or `null` |
+| `policyCode` | Layer 2 code such as `DESTINATION_NOT_ALLOWLISTED` or `TX_UNPARSEABLE`, or `null` |
 | `certainty` | `definite` or `uncertain` |
 | `confidence` | `simulate_v1`, `eth_call`, or `unknown` |
 | `failOpen` | `true` only when an uncertain sim was forwarded |

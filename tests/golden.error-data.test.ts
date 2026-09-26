@@ -131,4 +131,31 @@ describe("golden error.data shape", () => {
     expect(typeof data.policyCode).toBe("string");
     expect(data.policyCode).toBe("DESTINATION_NOT_ALLOWLISTED");
   });
+
+  it("-32083 TX_UNPARSEABLE when policy is on and the raw tx does not parse", async () => {
+    const cfg = config();
+    cfg.policy = defaultSpendPolicy();
+    cfg.policy.enabled = true;
+    cfg.policy.destinations = new Map([
+      ["0x0000000000000000000000000000000000000001", {}],
+    ]);
+    const simulate = vi.fn();
+    const forward = vi.fn();
+    const res = await handleRequest(
+      cfg,
+      { jsonrpc: "2.0", id: 5, method: "eth_sendRawTransaction", params: ["0xdeadbeef"] },
+      undefined,
+      { simulate, forward }
+    );
+    expect(simulate).not.toHaveBeenCalled();
+    expect(forward).not.toHaveBeenCalled();
+    expect(res.error?.code).toBe(ERR_POLICY_DENIED);
+    expect(dataOf(res)).toMatchObject({
+      decision: "policy_denied",
+      layer: 2,
+      policyCode: "TX_UNPARSEABLE",
+      certainty: "definite",
+      chainId: 421614,
+    });
+  });
 });

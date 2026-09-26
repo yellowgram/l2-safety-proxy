@@ -68,6 +68,10 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+function enabledPreview(json: Record<string, unknown>): boolean {
+  return json.enabled === true;
+}
+
 function unknownKeys(
   errors: string[],
   obj: Record<string, unknown>,
@@ -209,7 +213,11 @@ export function checkPolicyDocument(json: unknown): PolicyCheckReport {
       for (const [key, overlay] of Object.entries(json.chains)) {
         if (!key.trim()) schemaErrors.push("chains contains an empty key");
         checkChainOverlay(schemaErrors, overlay, `chains[${key}].`, poisons);
-        if (isPlainObject(overlay) && overlay.allowAnyDestination === true) {
+        if (
+          enabledPreview(json) &&
+          isPlainObject(overlay) &&
+          overlay.allowAnyDestination === true
+        ) {
           sanityErrors.push(
             `chains[${key}].allowAnyDestination=true removes the destination fence`
           );
@@ -242,9 +250,9 @@ export function checkPolicyDocument(json: unknown): PolicyCheckReport {
   }
 
   const enabled = json.enabled === true;
-  if (json.allowAnyDestination === true) {
+  if (enabled && json.allowAnyDestination === true) {
     sanityErrors.push(
-      "allowAnyDestination=true removes the destination fence; policy:check refuses it"
+      "allowAnyDestination=true removes the destination fence; policy:check refuses it while enabled is true"
     );
   }
 

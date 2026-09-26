@@ -54,7 +54,7 @@ npm run agent:loop
 
 ## Layer 2 (optional)
 
-Send order: refuse `eth_sendTransaction` (`-32081`) → signed `chainId` vs selected chain (`-32084` on mismatch) → Layer 2 allowlist/caps when enabled (`-32083`, not fail-open) → Layer 1 sim. `checkWithConfig` applies the same policy and chain check. Default policy off. Decision table: [AGENT_DECISION_TABLE.md](./AGENT_DECISION_TABLE.md). Policy ON is not a safe agent: [RESIDUAL_BYPASSES.md](./RESIDUAL_BYPASSES.md).
+Send order: refuse `eth_sendTransaction` (`-32081`) → if policy is enabled and the raw tx does not parse, `-32083` `TX_UNPARSEABLE` (no fail-open) → signed `chainId` vs selected chain (`-32084` on mismatch; legacy txs with no `chainId` are not compared) → Layer 2 allowlist/caps when enabled (`-32083`, not fail-open) → Layer 1 sim. `checkWithConfig` applies the same policy and chain check. Default policy off. Decision table: [AGENT_DECISION_TABLE.md](./AGENT_DECISION_TABLE.md). Policy ON is not a safe agent: [RESIDUAL_BYPASSES.md](./RESIDUAL_BYPASSES.md).
 
 
 ## AgentKit / viem wrapper

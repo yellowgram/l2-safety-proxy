@@ -6,9 +6,11 @@
  *   node examples/agent-viem-halt.mjs
  *
  * Decisions:
- *   -32083 / policy_denied → non-retryable halt (further submits do not hit RPC)
+ *   -32083 / policy_denied (including TX_UNPARSEABLE) → non-retryable halt
  *   -32080 definite revert → abort; the same raw is not sent again
+ *   -32084 chain_mismatch → also non-retryable (covered by demo:dual-layer)
  *   never calls eth_sendTransaction
+ *   viem transport retryCount is 0 so the client does not replay a deny
  *
  * Published consumers import helpers from "l2-send-guard/sdk".
  * This file imports the built package so it runs inside the repo without a publish.
@@ -101,8 +103,9 @@ async function boot(mode, policy) {
   await new Promise((r) => proxy.listen(0, "127.0.0.1", r));
   const addr = proxy.address();
   const proxyUrl = `http://127.0.0.1:${addr.port}`;
+  const [guardUrl, guardOpts] = viemHttpArgs({ proxyUrl, chain: "arb-sepolia" });
   const client = createPublicClient({
-    transport: viemHttp(...viemHttpArgs({ proxyUrl, chain: "arb-sepolia" })),
+    transport: viemHttp(guardUrl, { ...guardOpts, retryCount: 0 }),
   });
   return { proxy, upstream, client };
 }

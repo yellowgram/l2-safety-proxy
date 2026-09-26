@@ -147,6 +147,17 @@ describe("check() Layer 2 policy", () => {
     const r = await check(RAW, base, { simulate });
     expect(r.decision).toBe("chain_mismatch");
     expect(r.layer).toBeNull();
+    expect(r.policyCode).toBeNull();
+    expect(simulate).not.toHaveBeenCalled();
+  });
+
+  it("unparseable raw is policy_denied when policy is enabled", async () => {
+    const policy = defaultSpendPolicy();
+    policy.enabled = true;
+    const simulate = vi.fn();
+    const r = await check("0xdeadbeef", chain, { policy, simulate });
+    expect(r.decision).toBe("policy_denied");
+    expect(r.policyCode).toBe("TX_UNPARSEABLE");
     expect(simulate).not.toHaveBeenCalled();
   });
 });
