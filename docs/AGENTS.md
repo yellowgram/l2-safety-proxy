@@ -34,7 +34,7 @@ Unlocking accounts / node-held keys is out of scope. Do not point an unlocked ge
 
 ## Health
 
-`GET /health` lists enabled chains (`arb-sepolia`, `op-sepolia`, `base-sepolia` by default), `chainDetails`, submit methods accepted vs refused, **`policy`** summary (`enabled`, `destinationCount` — **no addresses**), and process-lifetime **`decisions`** counters (`abort` / `fail_open` / `forward` / `policy_denied`).
+`GET /health` lists enabled chains (`arb-sepolia`, `op-sepolia`, `base-sepolia` by default), `chainDetails`, submit methods accepted vs refused, **`policy`** summary (`enabled`, `destinationCount` — **no addresses**, `notifyConfigured`), and process-lifetime **`decisions`** counters (`abort` / `fail_open` / `forward` / `policy_denied` / `chain_mismatch` / `unsigned_refused`).
 
 
 ## Thin `check()` API (Delta C)
@@ -54,13 +54,14 @@ npm run agent:loop
 
 ## Layer 2 (optional)
 
-If `L2SG_POLICY_ENABLED` / policy file is on, address/spend allowlist+caps run **before** sim. Denials are `-32083` / `policy_denied` (not fail-open). `checkWithConfig` applies `config.policy` the same way. Default off.
+Send order: refuse `eth_sendTransaction` (`-32081`) → signed `chainId` vs selected chain (`-32084` on mismatch) → Layer 2 allowlist/caps when enabled (`-32083`, not fail-open) → Layer 1 sim. `checkWithConfig` applies the same policy and chain check. Default policy off. Decision table: [AGENT_DECISION_TABLE.md](./AGENT_DECISION_TABLE.md). Policy ON is not a safe agent: [RESIDUAL_BYPASSES.md](./RESIDUAL_BYPASSES.md).
 
 
 ## AgentKit / viem wrapper
 
 ```bash
-npm run demo:dual-layer   # offline proof: -32080 + -32083
+npm run demo:dual-layer   # offline proof; diffs docs/fixtures/dual-layer.expected.txt
+node examples/agent-viem-halt.mjs
 ```
 
 Wire-up example: [`examples/agentkit-viem.ts`](../examples/agentkit-viem.ts).  

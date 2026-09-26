@@ -1,58 +1,52 @@
-# Paid support & integration (optional)
+# Support boundary
 
-**L2 Send Guard stays MIT / free to run.** Core simulation, fail-open semantics, and optional Layer 2 policy are not paywalled. This page is for teams that want **fixed-scope help** or **priority triage**.
+**L2 Send Guard stays MIT and free to run.** Simulation, fail-open semantics, and optional thin Layer 2 policy are not paywalled.
 
-**Try before you buy:** [`docs/INBOUND_DEMO.md`](./docs/INBOUND_DEMO.md) — `npm test` / `npm run build` / `npm run demo:dual-layer`, how to read `-32080` / `-32083`, expected PASS transcript.
+Free support is **best-effort**. There is **no SLA** and no on-call.
 
-Community (free): GitHub **Issues** & **Discussions** on [yellowgram/l2-safety-proxy](https://github.com/yellowgram/l2-safety-proxy). No SLA.
+## Where to write
 
-**Contact for paid SKUs:** reply on GitHub Issues / Discussions (title `support: <SKU>`), **or** email `CONTACT_EMAIL_TBA` when the founder publishes an address. Do not invent founder contact details from this repo.
-
-Sim ≠ policy positioning: [`docs/COMPETITIVE.md`](./docs/COMPETITIVE.md). Income kill clock (internal): [`docs/INCOME_GATE.md`](./docs/INCOME_GATE.md).
-
----
-
-## Public SKUs (USD)
-
-| SKU | What you get | Price (USD) | Typical calendar |
-| --- | --- | --- | --- |
-| **AgentKit wire-up** | Point AgentKit / viem / ethers at Guard; dual-layer demo (`-32080` / `-32083`); policy.agent template tuned to your allowlist; short handoff note | **$1,200** | **3 days** |
-| **Policy pack review** | Review of your Layer 2 JSON (allowlist, native caps, notify hook); bypass honesty checklist (approve / Permit2 / multicall); written residual risks — **no** Safe-clone redesign | **$600** | **1–2 days** |
-| **Priority triage retainer** | Slack/email triage queue for Guard runtime questions; best-effort same-business-day reply on regressions you can repro offline | **$800 / month** | Monthly |
-
-Prices are **public list** in USD. Currency / settlement (INR / USDT / Wise / other) is chosen **on the invoice** after scope is confirmed — not advertised as fake checkout links in this repo.
-
-Custom pilots: start from [`docs/PILOT_SOW.md`](./docs/PILOT_SOW.md) (blanks for deliverables / success metrics / price).
-
----
-
-## Community vs paid boundary
-
-| Included free (OSS) | Paid |
+| Channel | For |
 | --- | --- |
-| Run proxy, Layer 1 sim, Layer 2 policy (self-hosted) | Hands-on wire-up into your agent stack |
-| Docs, offline demos, eval harness, GitHub issues | Scheduled review of *your* policy pack |
-| Best-effort maintainer replies when capacity allows | Retainer SLA-ish priority triage |
+| **GitHub Issues** | Bugs with an offline repro: package pin or commit, Node version, OS, `npm test` and `npm run demo:dual-layer` output (or why the offline demo failed), and redacted env **booleans** only. Template: `.github/ISSUE_TEMPLATE/bug_report.md`. |
+| **GitHub Discussions** | How-to: install path, policy shape, chain header, reading an error code. |
 
-We will **not** charge for access to core middleware features.
+Issues that omit the repro may be closed after 14 days. No auto-close bot ships in this repo. Maintainers close them by hand.
 
----
+Nonce, underpriced, and faucet failures are not Issues. See [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md).
 
-## How to buy (invoice path)
+## Paid work is invoice-real, and this repo is not a checkout
 
-1. **Inbound only:** open a GitHub Issue / Discussion titled `support: <SKU>`, **or** email `CONTACT_EMAIL_TBA` (placeholder until founder publishes).  
-2. Confirm SKU + scope in writing (use [`docs/PILOT_SOW.md`](./docs/PILOT_SOW.md) for multi-day pilots).  
-3. **Founder provides payee details on the invoice** (USDT network+address, Wise business details, Razorpay/card link, or other). CoS fills invoice fields **only after** the founder supplies them — **no** invented Wise/USDT/Razorpay details or fake checkout URLs in this repo.  
-4. Work starts after cleared payment (or written net-terms agreement).
+Fixed-scope help (AgentKit / viem wire-up, a review of your policy file, retainer triage) is not for sale from this file.
 
-### Internal process (agents / CoS — not a customer step)
+There is **no payee, payment link, or contact email** in this repository. Do not send funds to any address you infer from the code, the docs, or a commit.
 
-1. Draft SOW from [`docs/PILOT_SOW.md`](./docs/PILOT_SOW.md) when an inbound thread exists.  
-2. **Founder sends** the SOW / invoice to the buyer.  
-3. **Never CoS cold-send** — no unsolicited SOW email, Soft WTP bumps, or invented payee details. Soft WTP freeze: do not bump AgentKit #1512.
+A paid engagement exists only after all of the following:
 
----
+1. You open a GitHub issue or discussion titled `support: <SKU>` and attach the artifacts in [docs/BUYER_ACCEPTANCE.md](./docs/BUYER_ACCEPTANCE.md).
+2. Scope is confirmed in writing (multi-day work can start from [docs/PILOT_SOW.md](./docs/PILOT_SOW.md)).
+3. The founder sends an invoice that includes **payee details the founder supplies on that invoice**.
 
-## Out of scope for these SKUs
+Work starts after that invoice is paid, or after a written net-terms agreement. Until the founder attaches a real payee to an invoice, **there is nothing to pay**.
 
-Key custody · becoming your RPC cloud · Safe / Zodiac / ERC-7579 builds · Approval-Inbox product clone · grant-application writing · Soft WTP / cold outreach on your behalf · hosted SaaS before the income gate ([`docs/INCOME_GATE.md`](./docs/INCOME_GATE.md)).
+This repo does not configure Wise, Polar, USDT, or any other rail.
+
+## SKUs (scope description, not a payment page)
+
+| SKU | What you get | List price (USD) | Typical calendar |
+| --- | --- | --- | --- |
+| **AgentKit wire-up** | Point an external signer at Guard; confirm the offline dual-layer demo; tune `policy.agent` to your allowlist; a short handoff note | 1200 | 3 days |
+| **Policy pack review** | Review of your Layer 2 JSON (allowlist, native caps, notify URL) and a written residual-bypass note. Not a Safe redesign | 600 | 1–2 days |
+| **Priority triage retainer** | A queue for Guard questions you can repro offline | 800 / month | Monthly |
+
+Prices are a public list so scope is not negotiated from scratch. They are not an offer you can accept by sending money. Settlement currency is whatever the founder writes on the invoice, after scope is confirmed.
+
+## Out of scope (auto-reply)
+
+Use this text when a request is outside the free project and outside the SKUs:
+
+> This request is out of scope for L2 Send Guard free support and for the published SKUs: key custody, new chains, Safe / Zodiac / ERC-7579 clones, hosted SaaS, grant writing, and Soft-WTP or cold outreach. Thin Layer 2 is an allowlist plus native caps on arb/op/base Sepolia only. Policy ON is not a safe agent. See SUPPORT.md and docs/RESIDUAL_BYPASSES.md.
+
+## What stays free
+
+Run the proxy, Layer 1 simulation, Layer 2 policy (self-hosted), the docs, and the offline demos. Maintainer replies on Issues and Discussions when there is capacity. No response-time commitment.
