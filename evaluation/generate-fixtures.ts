@@ -191,6 +191,9 @@ function buildFixtures(): EvalFixture[] {
     for (let i = 0; i < count; i++) {
       n += 1;
       const chain = CHAINS[(n - 1) % CHAINS.length];
+      // BASE_RAW is signed for Arb Sepolia. The proxy rejects a signed
+      // chainId that disagrees with the selected chain, so every fixture
+      // keeps chainId 421614. chainKey still rotates for template names.
       const id = paddedId(n);
       const reason =
         scenario.simKind === "definite_revert"
@@ -206,7 +209,7 @@ function buildFixtures(): EvalFixture[] {
       const fixture: EvalFixture = {
         id,
         chainKey: chain.chainKey,
-        chainId: chain.chainId,
+        chainId: 421614,
         guardMode: scenario.guardMode,
         rawTx: variantRaw(id),
         sim: {

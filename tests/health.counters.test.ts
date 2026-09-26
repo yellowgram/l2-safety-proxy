@@ -54,7 +54,17 @@ describe("health policy summary + decision counters", () => {
     expect(body.ok).toBe(true);
     expect(body.policy.enabled).toBe(true);
     expect(body.policy.destinationCount).toBe(2);
+    expect(body.policy.notifyConfigured).toBe(false);
     expect(JSON.stringify(body)).not.toMatch(/0x11111111/i);
+    policy.humanGate = { mode: "stop", notifyUrl: "http://127.0.0.1:9/hook" };
+    const server2 = createServer(baseConfig(policy));
+    await new Promise<void>((r) => server2.listen(0, "127.0.0.1", () => r()));
+    const addr2 = server2.address();
+    if (!addr2 || typeof addr2 === "string") throw new Error("no addr");
+    const body2 = await fetch(`http://127.0.0.1:${addr2.port}/health`).then((r) => r.json());
+    expect(body2.policy.notifyConfigured).toBe(true);
+    expect(JSON.stringify(body2)).not.toMatch(/127\.0\.0\.1:9/);
+    await new Promise<void>((r) => server2.close(() => r()));
     expect(body.decisions.totalSendDecisions).toBe(0);
     await new Promise<void>((r) => server.close(() => r()));
   });

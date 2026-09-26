@@ -1,7 +1,13 @@
 import http from "node:http";
 import type { GuardConfig, JsonRpcRequest } from "../types/index.js";
+import { PACKAGE_VERSION } from "../version.js";
 import { handlePayload } from "./handler.js";
 import { getDecisionCounters } from "./counters.js";
+import { ensureDecisionLogDir } from "./decisionLog.js";
+
+function overlayAllowsAny(policy: GuardConfig["policy"]): boolean {
+  return Object.values(policy.chains).some((overlay) => overlay.allowAnyDestination === true);
+}
 
 function policyHealthSummary(config: GuardConfig) {
   const p = config.policy;
@@ -26,7 +32,7 @@ export function createServer(config: GuardConfig): http.Server {
         JSON.stringify({
           ok: true,
           service: "l2-send-guard",
-          version: "0.4.0",
+          version: PACKAGE_VERSION,
           chains: Object.keys(config.chains),
           chainDetails: Object.values(config.chains).map((c) => ({
             id: c.id,
@@ -104,6 +110,7 @@ export function createServer(config: GuardConfig): http.Server {
 
 export function listen(config: GuardConfig): http.Server {
   const server = createServer(config);
+  ensureDecisionLogDir(config.decisionLogPath);
   server.listen(config.listenPort, config.listenHost, () => {
     console.log(
       `[l2-send-guard] listening on http://${config.listenHost}:${config.listenPort}`
@@ -121,6 +128,23 @@ export function listen(config: GuardConfig): http.Server {
           ? ` destinations=${pol.destinations.size}`
           : " (set L2SG_POLICY_ENABLED / L2SG_POLICY_FILE)")
     );
+    if (
+      config.listenHost === "0.0.0.0" ||
+      config.listenHost === "::" ||
+      config.listenHost === "::0"
+    ) {
+      console.warn(
+        `[l2-send-guard] WARNING: L2SG_HOST=${config.listenHost} accepts unauthenticated requests. ` +
+          "Anyone who can reach this port can forward raw transactions through your upstream RPC. " +
+          "Prefer 127.0.0.1 unless a network ACL sits in front. " +
+          "Docker: publish 127.0.0.1:8545:8545 on the host, not 0.0.0.0:8545:8545."
+      );
+    }
+    if (pol?.enabled && (pol.allowAnyDestination || overlayAllowsAny(pol))) {
+      console.warn(
+        "[l2-send-guard] WARNING: allowAnyDestination=true — the destination allowlist is not a spend fence. Caps still apply. Policy ON is not a safe agent."
+      );
+    }
   });
   return server;
 }

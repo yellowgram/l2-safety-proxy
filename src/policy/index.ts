@@ -10,5 +10,13 @@ export {
 } from "./types.js";
 export { evaluateSpendPolicy } from "./evaluate.js";
 export { loadSpendPolicy } from "./load.js";
+export {
+  checkPolicyDocument,
+  checkPolicyText,
+  isPoisonAddress,
+  listPoisonAddresses,
+  policyReportOk,
+  type PolicyCheckReport,
+} from "./check.js";
 export { decodeErc20Transfer } from "./erc20.js";
 export { notifyPolicyDenied } from "./notify.js";

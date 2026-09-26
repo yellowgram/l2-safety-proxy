@@ -11,6 +11,10 @@
  * Run conceptually:
  *   npx tsx examples/agentkit-viem.ts
  * (Requires DEMO_PRIVATE_KEY in env for a live send — omit for dry compile check.)
+ *
+ * Halt / no-rebroadcast behavior is the offline sample `examples/agent-viem-halt.mjs`.
+ * Decision table: docs/AGENT_DECISION_TABLE.md.
+ * Policy ON is not a safe agent: docs/RESIDUAL_BYPASSES.md.
  */
 
 import { createWalletClient, http, type Hex } from "viem";

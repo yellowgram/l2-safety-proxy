@@ -8,12 +8,12 @@ const RAW =
   "0x02f86d83066eee80843b9aca00843b9aca008252089400000000000000000000000000000000000000018080c001a07eade7c743ff2ea60f61c687ccca4b77553a14de08378371ac40c7d52a8f1d74a06fed4faa592ac84bae32b9311844176fc059eb70057c18450d4310072a880629" as Hex;
 
 const chain: ChainConfig = {
-  id: "base-sepolia",
-  name: "Base Sepolia",
-  chainId: 84532,
+  id: "arb-sepolia",
+  name: "Arbitrum Sepolia",
+  chainId: 421614,
   upstreamRpcUrl: "http://test",
   preferSimulateV1: true,
-  ecosystem: "base",
+  ecosystem: "arbitrum",
 };
 
 function shapeKeys(r: Record<string, unknown>) {
@@ -94,13 +94,13 @@ describe("agent check()", () => {
     const config: GuardConfig = {
       listenHost: "127.0.0.1",
       listenPort: 8545,
-      defaultChain: "base-sepolia",
+      defaultChain: "arb-sepolia",
       guardMode: "open",
       failOpen: true,
     policy: defaultSpendPolicy(),
-      chains: { "base-sepolia": chain },
+      chains: { "arb-sepolia": chain },
     };
-    const r = await checkWithConfig(RAW, config, "base-sepolia", {
+    const r = await checkWithConfig(RAW, config, "arb-sepolia", {
       simulate: async () => ({
         ok: true,
         method: "eth_call",
@@ -122,16 +122,31 @@ describe("check() Layer 2 policy", () => {
     const config: GuardConfig = {
       listenHost: "127.0.0.1",
       listenPort: 8545,
-      defaultChain: "base-sepolia",
+      defaultChain: "arb-sepolia",
       guardMode: "open",
       failOpen: true,
       policy,
-      chains: { "base-sepolia": chain },
+      chains: { "arb-sepolia": chain },
     };
     const simulate = vi.fn();
-    const r = await checkWithConfig(RAW, config, "base-sepolia", { simulate });
+    const r = await checkWithConfig(RAW, config, "arb-sepolia", { simulate });
     expect(r.decision).toBe("policy_denied");
     expect(r.layer).toBe(2);
+    expect(simulate).not.toHaveBeenCalled();
+  });
+
+  it("signed chainId mismatch does not simulate", async () => {
+    const base: ChainConfig = {
+      ...chain,
+      id: "base-sepolia",
+      name: "Base Sepolia",
+      chainId: 84532,
+      ecosystem: "base",
+    };
+    const simulate = vi.fn();
+    const r = await check(RAW, base, { simulate });
+    expect(r.decision).toBe("chain_mismatch");
+    expect(r.layer).toBeNull();
     expect(simulate).not.toHaveBeenCalled();
   });
 });

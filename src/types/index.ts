@@ -21,7 +21,13 @@ export type SimMethod =
 export type GuardMode = "open" | "strict";
 
 /** Decision taken by the guard for a send. */
-export type GuardDecision = "abort" | "fail_open" | "forward" | "policy_denied";
+export type GuardDecision =
+  | "abort"
+  | "fail_open"
+  | "forward"
+  | "policy_denied"
+  | "chain_mismatch"
+  | "unsigned_refused";
 
 export interface SimSuccess {
   ok: true;
@@ -76,6 +82,11 @@ export interface GuardConfig {
   failOpen: boolean;
   /** Layer 2 address/spend policy (default enabled=false). */
   policy: SpendPolicyConfig;
+  /**
+   * Append-only JSONL of send decisions. Unset = do not write.
+   * See docs/DECISION_LOG.md.
+   */
+  decisionLogPath?: string;
 }
 
 /** Guard metadata attached to every send abort / fail_open / forward. */
@@ -99,9 +110,12 @@ export interface GuardResponseMeta {
   rawData?: `0x${string}`;
   aborted?: boolean;
   failOpen?: boolean;
-  /** 1 = simulation, 2 = spend policy */
-  layer?: 1 | 2;
-  policyCode?: string;
+  /** 1 = simulation, 2 = spend policy, null = not a layer decision */
+  layer?: 1 | 2 | null;
+  /** Machine policy code, or null when this decision is not a policy deny. */
+  policyCode?: string | null;
+  /** Signed tx chain id when it disagreed with the selected chain. */
+  signedChainId?: number;
   to?: `0x${string}`;
   value?: `0x${string}`;
   hint?: string;
@@ -154,6 +168,12 @@ export const ERR_STRICT_UNCERTAIN = -32082;
 
 /** Custom error code: Layer 2 address/spend policy denied (definite stop, not fail-open) */
 export const ERR_POLICY_DENIED = -32083;
+
+/**
+ * Signed tx chainId disagrees with the chain selected by x-l2sg-chain
+ * (or the default chain). Not forwarded. Not a policy deny and not a sim abort.
+ */
+export const ERR_CHAIN_MISMATCH = -32084;
 
 /** Map internal SimMethod → response confidence provenance. */
 export function methodConfidence(method: SimMethod): MethodConfidence {
