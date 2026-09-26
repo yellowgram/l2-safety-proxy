@@ -54,6 +54,23 @@ describe("health policy summary + decision counters", () => {
     expect(body.ok).toBe(true);
     expect(body.policy.enabled).toBe(true);
     expect(body.policy.destinationCount).toBe(2);
+    policy.chains = {
+      "op-sepolia": {
+        destinations: new Map([
+          ["0x3333333333333333333333333333333333333333", {}],
+        ]),
+      },
+    };
+    const serverOverlay = createServer(baseConfig(policy));
+    await new Promise<void>((r) => serverOverlay.listen(0, "127.0.0.1", () => r()));
+    const addrOverlay = serverOverlay.address();
+    if (!addrOverlay || typeof addrOverlay === "string") throw new Error("no addr");
+    const overlayBody = await fetch(`http://127.0.0.1:${addrOverlay.port}/health`).then((r) =>
+      r.json()
+    );
+    expect(overlayBody.policy.destinationCount).toBe(3);
+    expect(JSON.stringify(overlayBody)).not.toMatch(/0x33333333/i);
+    await new Promise<void>((r) => serverOverlay.close(() => r()));
     expect(body.policy.notifyConfigured).toBe(false);
     expect(JSON.stringify(body)).not.toMatch(/0x11111111/i);
     policy.humanGate = { mode: "stop", notifyUrl: "http://127.0.0.1:9/hook" };

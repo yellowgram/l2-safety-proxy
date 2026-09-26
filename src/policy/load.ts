@@ -214,13 +214,23 @@ export function loadSpendPolicy(): SpendPolicyConfig {
   }
   const allowlist = env("L2SG_POLICY_ALLOWLIST");
   if (allowlist) {
+    const invalid: string[] = [];
     for (const part of allowlist.split(",")) {
       const a = part.trim();
       if (!a) continue;
+      if (!/^0x[0-9a-fA-F]{40}$/.test(a)) {
+        invalid.push(a);
+        continue;
+      }
       const key = normKey(a);
       if (!policy.destinations.has(key)) {
         policy.destinations.set(key, {});
       }
+    }
+    if (invalid.length > 0) {
+      throw new Error(
+        `L2SG_POLICY_ALLOWLIST has entries that are not 0x + 40 hex addresses: ${invalid.join(", ")}. Refusing to start.`
+      );
     }
   }
   const notify = env("L2SG_POLICY_NOTIFY_URL");
@@ -229,6 +239,14 @@ export function loadSpendPolicy(): SpendPolicyConfig {
   }
 
   if (policy.enabled) {
+    const fenceOpen =
+      policy.allowAnyDestination ||
+      Object.values(policy.chains).some((overlay) => overlay.allowAnyDestination === true);
+    if (fenceOpen) {
+      throw new Error(
+        "Refusing to start: Layer 2 policy is enabled and allowAnyDestination=true (file, chain overlay, or L2SG_POLICY_ALLOW_ANY). That removes the destination fence. Set it false and run npm run policy:check."
+      );
+    }
     const poisons = listPoisonAddresses(policy);
     if (poisons.length > 0) {
       throw new Error(

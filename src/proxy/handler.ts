@@ -211,6 +211,8 @@ function attachL2sg(
  * 3. Parse the signed raw tx. If `chainId` is present and ≠ the selected chain,
  *    stop with -32084 `chain_mismatch` (no sim, no policy, no forward).
  *    Legacy txs with no chainId are not compared.
+ *    If policy is enabled and the raw tx does not parse, stop with -32083
+ *    `TX_UNPARSEABLE` (do not fail-open). Policy off keeps the Layer 1 path.
  * 4. If Layer 2 policy is enabled, evaluate allowlist + caps. Deny → -32083
  *    `policy_denied` and do not simulate. Policy denials never fail-open.
  * 5. Layer 1 simulate. Definite revert → -32080 abort (no forward).
@@ -297,12 +299,21 @@ export async function handleRequest(
     };
   }
 
-  // Parse once. Failure skips chain compare and policy, then uses Layer 1.
+  // Parse once. Failure with policy on is a definite stop (the fence cannot run).
+  // Failure with policy off keeps the Layer 1 path.
   let parsed: ReturnType<typeof parseRawTransaction> | undefined;
   try {
     parsed = parseRawTransaction(raw as Hex);
   } catch {
     parsed = undefined;
+  }
+
+  if (!parsed && config.policy?.enabled) {
+    return policyDeniedResponse(config, req.id, chain, chainKey, req.method, {
+      reason: "signed transaction could not be parsed; Layer 2 policy was not evaluated",
+      policyCode: "TX_UNPARSEABLE",
+      valueWei: 0n,
+    });
   }
 
   if (

@@ -6,7 +6,20 @@ import { getDecisionCounters } from "./counters.js";
 import { ensureDecisionLogDir } from "./decisionLog.js";
 
 function overlayAllowsAny(policy: GuardConfig["policy"]): boolean {
+  if (!policy) return false;
   return Object.values(policy.chains).some((overlay) => overlay.allowAnyDestination === true);
+}
+
+/** Distinct addresses on the base map or any chain overlay. Not the effective set for one chain. */
+function configuredDestinationCount(policy: GuardConfig["policy"]): number {
+  if (!policy) return 0;
+  const keys = new Set<string>();
+  for (const addr of policy.destinations.keys()) keys.add(addr.toLowerCase());
+  for (const overlay of Object.values(policy.chains)) {
+    if (!overlay.destinations) continue;
+    for (const addr of overlay.destinations.keys()) keys.add(addr.toLowerCase());
+  }
+  return keys.size;
 }
 
 function policyHealthSummary(config: GuardConfig) {
@@ -14,8 +27,10 @@ function policyHealthSummary(config: GuardConfig) {
   const enabled = Boolean(p?.enabled);
   return {
     enabled,
-    destinationCount: enabled ? (p?.destinations?.size ?? 0) : 0,
-    allowAnyDestination: enabled ? Boolean(p?.allowAnyDestination) : false,
+    destinationCount: enabled ? configuredDestinationCount(p) : 0,
+    allowAnyDestination: enabled
+      ? Boolean(p?.allowAnyDestination) || overlayAllowsAny(p)
+      : false,
     allowContractCreation: enabled ? Boolean(p?.allowContractCreation) : false,
     hasGlobalMaxNativeWei: enabled ? p?.globalMaxNativeWei != null : false,
     erc20RecipientCheck: enabled ? Boolean(p?.erc20RecipientCheck) : false,
@@ -125,7 +140,7 @@ export function listen(config: GuardConfig): http.Server {
     console.log(
       `[l2-send-guard] Layer2 policy=${pol?.enabled ? "ON" : "OFF"}` +
         (pol?.enabled
-          ? ` destinations=${pol.destinations.size}`
+          ? ` destinations=${configuredDestinationCount(pol)}`
           : " (set L2SG_POLICY_ENABLED / L2SG_POLICY_FILE)")
     );
     if (

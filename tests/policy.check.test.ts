@@ -38,6 +38,20 @@ describe("policy:check rules", () => {
     expect(policyReportOk(report)).toBe(true);
   });
 
+  it("flags allowAnyDestination only when the file is enabled", () => {
+    const off = checkPolicyDocument({
+      enabled: false,
+      allowAnyDestination: true,
+    });
+    expect(off.sanityErrors).toEqual([]);
+    const on = checkPolicyDocument({
+      enabled: true,
+      allowAnyDestination: true,
+      destinations: {},
+    });
+    expect(on.sanityErrors.join(" ")).toMatch(/allowAnyDestination/);
+  });
+
   it("rejects comments, bad addresses, and allowAnyDestination", () => {
     expect(checkPolicyText("{ enabled: true }").schemaErrors[0]).toMatch(/invalid JSON/i);
     const bad = checkPolicyDocument({

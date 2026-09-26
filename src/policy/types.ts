@@ -3,7 +3,8 @@ export type PolicyDenyCode =
   | "DESTINATION_NOT_ALLOWLISTED"
   | "OVER_CAP"
   | "CONTRACT_CREATE_DENIED"
-  | "NEEDS_APPROVAL";
+  | "NEEDS_APPROVAL"
+  | "TX_UNPARSEABLE";
 
 export interface DestinationPolicy {
   /** Max native wei for a single tx to this destination (inclusive). */

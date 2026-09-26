@@ -10,6 +10,10 @@ Minimum-support bar for the thin Guard. **npm publish of `l2-send-guard@0.5.0` i
 - `L2SG_POLICY_ENABLED=true` with no `L2SG_POLICY_FILE` and no `L2SG_POLICY_ALLOWLIST` refuses to start.
 - A missing, unreadable, or schema-invalid `L2SG_POLICY_FILE` refuses to start. Policy does not silently turn off.
 - An **enabled** policy that still contains placeholder destinations (`0x1111…` / `0x2222…`, any repeated non-zero nibble) refuses to start.
+- An **enabled** policy with `allowAnyDestination: true` on the base document, a chain overlay, or `L2SG_POLICY_ALLOW_ANY` refuses to start. A file that stays disabled may still contain the flag. `npm run policy:check` flags that flag only when the file's `enabled` is true. It does not read env overrides; process start is the check for the merged config.
+- `L2SG_POLICY_ALLOWLIST` entries that are not `0x` + 40 hex refuse to start.
+- When policy is enabled and the raw transaction does not parse, the proxy returns **`-32083`** `policy_denied` with `policyCode: TX_UNPARSEABLE` and does not simulate or forward. Policy off keeps the Layer 1 path.
+- `/health` `policy.destinationCount` is the number of distinct addresses on the base map or any chain overlay. It is not the effective allowlist for one chain, and it does not list addresses. `policy.allowAnyDestination` is true when the base flag or any overlay is true.
 - `docker-compose.yml` publishes `127.0.0.1:8545:8545` and mounts the policy file read-only. The process inside the container still binds `0.0.0.0` so Docker's proxy can reach it, and it logs a wildcard-bind warning.
 
 ### Added
@@ -19,7 +23,7 @@ Minimum-support bar for the thin Guard. **npm publish of `l2-send-guard@0.5.0` i
 - `examples/agent-viem-halt.mjs` — `-32083` halts, `-32080` does not rebroadcast the same raw, never `eth_sendTransaction`.
 - `error.data` for `-32080`..`-32083` includes `decision`, `certainty`, `confidence`, `chainId`, `layer`, and `policyCode` (`null` when the decision is not a policy deny).
 - Optional `L2SG_DECISION_LOG` JSONL. Schema: [docs/DECISION_LOG.md](./docs/DECISION_LOG.md).
-- Docs: [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md), [docs/AGENT_DECISION_TABLE.md](./docs/AGENT_DECISION_TABLE.md), [docs/RESIDUAL_BYPASSES.md](./docs/RESIDUAL_BYPASSES.md), [docs/BUYER_ACCEPTANCE.md](./docs/BUYER_ACCEPTANCE.md), [SUPPORT.md](./SUPPORT.md), [SECURITY.md](./SECURITY.md).
+- Docs: [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md), [docs/AGENT_DECISION_TABLE.md](./docs/AGENT_DECISION_TABLE.md), [docs/RESIDUAL_BYPASSES.md](./docs/RESIDUAL_BYPASSES.md), [docs/BUYER_ACCEPTANCE.md](./docs/BUYER_ACCEPTANCE.md), [docs/DESIGN_ITERS.md](./docs/DESIGN_ITERS.md), [SUPPORT.md](./SUPPORT.md), [SECURITY.md](./SECURITY.md).
 
 ### Upgrade notes
 

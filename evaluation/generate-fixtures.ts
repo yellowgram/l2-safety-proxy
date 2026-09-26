@@ -21,11 +21,16 @@ const BASE_RAW =
 const REVERT_DATA =
   "0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000b6576616c2d726576657274000000000000000000000000000000000000000000" as `0x${string}`;
 
-const CHAINS = [
-  { chainKey: "arb-sepolia", chainId: 421614 },
-  { chainKey: "op-sepolia", chainId: 11155420 },
-  { chainKey: "base-sepolia", chainId: 84532 },
-] as const;
+/**
+ * BASE_RAW is signed for Arb Sepolia (chainId 421614).
+ * Every fixture uses that chainKey and chainId. Labeling rows op-sepolia or
+ * base-sepolia would claim those chains were exercised. Per-chain signed
+ * fixtures are deferred.
+ */
+const CORPUS_CHAIN = {
+  chainKey: "arb-sepolia",
+  chainId: 421614,
+} as const;
 
 type Scenario = {
   simKind: SimKind;
@@ -190,10 +195,6 @@ function buildFixtures(): EvalFixture[] {
   for (const { scenario, count } of PLAN) {
     for (let i = 0; i < count; i++) {
       n += 1;
-      const chain = CHAINS[(n - 1) % CHAINS.length];
-      // BASE_RAW is signed for Arb Sepolia. The proxy rejects a signed
-      // chainId that disagrees with the selected chain, so every fixture
-      // keeps chainId 421614. chainKey still rotates for template names.
       const id = paddedId(n);
       const reason =
         scenario.simKind === "definite_revert"
@@ -208,8 +209,8 @@ function buildFixtures(): EvalFixture[] {
 
       const fixture: EvalFixture = {
         id,
-        chainKey: chain.chainKey,
-        chainId: 421614,
+        chainKey: CORPUS_CHAIN.chainKey,
+        chainId: CORPUS_CHAIN.chainId,
         guardMode: scenario.guardMode,
         rawTx: variantRaw(id),
         sim: {
@@ -226,7 +227,7 @@ function buildFixtures(): EvalFixture[] {
           decision: scenario.decision,
           forwarded: scenario.forwarded,
         },
-        tags: [scenario.tag, chain.chainKey, scenario.guardMode],
+        tags: [scenario.tag, CORPUS_CHAIN.chainKey, scenario.guardMode],
         ...(scenario.policyAllowlist
           ? { policyAllowlist: scenario.policyAllowlist }
           : {}),
