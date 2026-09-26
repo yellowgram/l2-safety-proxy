@@ -1,5 +1,7 @@
 # Design iterations and code reviews (0.5.0 quality gate)
 
+Strategy lock after these reviews: low-support OSS. Ticket-cutting docs and the halt sample only. No new chains, custody, Safe, mainnet, hosted service, or paid/grant pages.
+
 Scope of the attacks: policy semantics, refuse-start, dual-path defaults, error shapes, the offline demo contract, and the support boundary. No custody product, no Safe or ERC-7579, no mainnet SLA, no hosted service, and no payment processor is in this design.
 
 ## Design iteration 1 — security / ops
@@ -63,7 +65,7 @@ Reviewed scripts, CI, changelog, examples, and the eval corpus generator.
 | `src/version.ts` could drift from `package.json`. | **Fixed.** `tests/version.test.ts`. |
 | Changelog omitted the fence refusal and `TX_UNPARSEABLE`. | **Fixed.** 0.5.0 behavior notes. |
 | Eval corpus `chainKey` rotated through OP and Base while `chainId` was 421614. | **Fixed.** Generator pins `arb-sepolia` / 421614. `evaluation/README.md` says the committed raw is Arb-signed and lists `policy_denied` in the class table. Per-chain signed fixtures are **deferred**; one raw cannot honestly cover three chains. |
-| `examples/agent-viem-halt.mjs` imports `../dist/` and fails with a module error if build has not run. | **Deferred.** CI builds first, and the file header says to build. A dynamic import would hide the same requirement behind a custom message without changing the contract. |
+| `examples/agent-viem-halt.mjs` imports `dist/` and failed with a module-not-found if build had not run. | **Fixed.** The sample checks for `dist/proxy/server.js` and exits with `npm run build` before importing. CI still builds first. |
 | `policy:check` cannot see `L2SG_POLICY_*` overrides. | **Documented, not "fixed" in the checker.** Start is the merged-config authority. Teaching the checker to reimplement env merge would fork the loader. Troubleshooting says to start after the file check. |
 
 ## Code review 3 — buyer / agent integrator

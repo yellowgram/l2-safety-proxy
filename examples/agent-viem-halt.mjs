@@ -14,16 +14,27 @@
  *
  * Published consumers import helpers from "l2-send-guard/sdk".
  * This file imports the built package so it runs inside the repo without a publish.
+ * If dist/ is missing it exits with a build instruction instead of a module error.
  */
+import { existsSync } from "node:fs";
 import http from "node:http";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createPublicClient, http as viemHttp, encodeErrorResult } from "viem";
-import { createServer } from "../dist/proxy/server.js";
-import { defaultSpendPolicy } from "../dist/policy/index.js";
-import {
-  isDefiniteRevertError,
-  isPolicyDeniedError,
-  viemHttpArgs,
-} from "../dist/sdk/index.js";
+
+const distServer = join(dirname(fileURLToPath(import.meta.url)), "../dist/proxy/server.js");
+if (!existsSync(distServer)) {
+  console.error(
+    "agent-viem-halt: dist/ is missing. Run `npm run build`, then `node examples/agent-viem-halt.mjs`."
+  );
+  process.exit(1);
+}
+
+const { createServer } = await import("../dist/proxy/server.js");
+const { defaultSpendPolicy } = await import("../dist/policy/index.js");
+const { isDefiniteRevertError, isPolicyDeniedError, viemHttpArgs } = await import(
+  "../dist/sdk/index.js"
+);
 
 const FAKE_RAW =
   "0x02f86d83066eee80843b9aca00843b9aca008252089400000000000000000000000000000000000000018080c001a07eade7c743ff2ea60f61c687ccca4b77553a14de08378371ac40c7d52a8f1d74a06fed4faa592ac84bae32b9311844176fc059eb70057c18450d4310072a880629";

@@ -67,7 +67,7 @@ npm run policy:check -- ./policy.json
 L2SG_POLICY_ENABLED=true L2SG_POLICY_FILE=./policy.json npm start
 ```
 
-If policy is enabled and the file is missing, invalid, or still full of placeholders, the process **refuses to start**. It will not silently run with policy off.
+If policy is enabled and the file is missing, invalid, or still full of placeholders, the process **refuses to start**. It will not silently run with policy off. The same refusal happens when the merged config sets `allowAnyDestination` (file, a chain overlay, or `L2SG_POLICY_ALLOW_ANY`). `npm run policy:check` reads the file only; start is what applies the env overrides.
 
 `GUARD_MODE` is a separate choice:
 
@@ -87,14 +87,14 @@ If policy is enabled and the file is missing, invalid, or still full of placehol
 | **-32080** | `abort` | Layer 1: definite revert. Not forwarded. Do not rebroadcast the same raw |
 | **-32081** | `unsigned_refused` | `eth_sendTransaction` refused. No key custody |
 | **-32082** | `abort` | Layer 1: uncertain sim and `GUARD_MODE=strict` |
-| **-32083** | `policy_denied` | Layer 2: destination or cap. Not forwarded. Non-retryable halt |
+| **-32083** | `policy_denied` | Layer 2: destination, cap, or `TX_UNPARSEABLE` (raw tx did not parse). Not forwarded. Non-retryable halt |
 | **-32084** | `chain_mismatch` | Signed `chainId` ≠ selected chain. Not a policy deny and not a sim result |
 
 **Simulation is not policy.** `-32080` means the tx would revert. `-32083` means the allowlist or cap said no — the tx might have succeeded on chain. Do not “fix” a policy deny by turning Layer 2 off.
 
 Stable `error.data` fields: `decision`, `certainty`, `confidence`, `chainId`, `layer` (`1`, `2`, or `null`), `policyCode` (string on `-32083`, otherwise `null`).
 
-Order inside a send: unsigned refuse → chain mismatch → Layer 2 policy (stop, no sim) → Layer 1 sim (abort or forward).
+Order inside a send: unsigned refuse → if policy is on and the raw tx does not parse, `-32083` `TX_UNPARSEABLE` → chain mismatch (`-32084`; legacy txs with no `chainId` are not compared) → Layer 2 policy (stop, no sim) → Layer 1 sim (abort or forward).
 
 ## Prove it offline
 
@@ -129,6 +129,7 @@ The compose file mounts `policy.agent.example.json` read-only at `/policy/policy
 Point HTTP at the proxy. The halt sample never calls `eth_sendTransaction`:
 
 ```bash
+npm run build   # the sample imports dist/; without a build it exits and says so
 node examples/agent-viem-halt.mjs
 ```
 
