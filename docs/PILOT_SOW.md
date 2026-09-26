@@ -2,7 +2,7 @@
 
 **Not an AF / ESP grant pack.** Use this when an inbound team wants a fixed pilot invoice for Guard dual-layer drop-in.
 
-**How buyers reply:** GitHub Issues / Discussions on [yellowgram/l2-safety-proxy](https://github.com/yellowgram/l2-safety-proxy), **or** email `CONTACT_EMAIL_TBA` when published. Do not invent a founder email.
+**How buyers reply:** GitHub Issues / Discussions on [yellowgram/l2-safety-proxy](https://github.com/yellowgram/l2-safety-proxy), titled `support: <SKU>`, with the artifacts in [BUYER_ACCEPTANCE.md](./BUYER_ACCEPTANCE.md). This repo has no payee and no contact email. The founder supplies payee details on the invoice. See [SUPPORT.md](../SUPPORT.md).
 
 **Internal send rule:** CoS / agents **draft** this SOW; the **founder sends** it to the inbound contact. Never CoS cold-send.
 
@@ -10,7 +10,7 @@
 | --- | --- |
 | **Customer** | |
 | **Primary contact** | |
-| **Reply channel** | GitHub Issue/Discussion URL · or email (`CONTACT_EMAIL_TBA`) |
+| **Reply channel** | GitHub Issue/Discussion URL (`support: <SKU>`) |
 | **Chains** | e.g. Arb / Base / OP Sepolia → mainnet later |
 | **Agent stack** | AgentKit / viem / ethers / other |
 | **SKU / price** | See [SUPPORT.md](../SUPPORT.md) or custom USD/INR |

@@ -3,102 +3,134 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-public-brightgreen)](https://github.com/yellowgram/l2-safety-proxy)
 
-**Multi-L2 pre-broadcast safety middleware** — simulate `eth_sendRawTransaction`, **abort definite reverts** with decoded errors, **fail-open** (or strict-abort) when uncertain. Optional **Layer 2** address/spend policy (allowlist + caps) beside simulation — default **off**.
+**Multi-L2 pre-broadcast safety middleware** for agent wallets. It simulates `eth_sendRawTransaction` and aborts definite reverts. An optional **thin Layer 2** policy (allowlist + native caps) can stop a send before simulation. Signing stays outside the proxy.
 
 Public: `git clone https://github.com/yellowgram/l2-safety-proxy.git`
 
-> **Paid help (optional):** fixed-scope AgentKit wire-up / policy pack review / retainer — see **[SUPPORT.md](./SUPPORT.md)**. OSS core stays free.  
-> **Inbound demo (no keys):** [`docs/INBOUND_DEMO.md`](./docs/INBOUND_DEMO.md) · sim ≠ policy: [`docs/COMPETITIVE.md`](./docs/COMPETITIVE.md)
+There is no single “fail closed out of the box” mode. Pick a path below. Layer 1 `open` forwards uncertain simulations. Layer 2 off means there is no spend fence.
 
-## What
+> **Support:** bugs with an offline repro go to Issues. How-to goes to Discussions. Paid wire-up is not a checkout — [SUPPORT.md](./SUPPORT.md).  
+> **Offline proof:** [`docs/fixtures/dual-layer.expected.txt`](./docs/fixtures/dual-layer.expected.txt) · [`docs/INBOUND_DEMO.md`](./docs/INBOUND_DEMO.md)
+
+## Supported surface (this release)
 
 | | |
 | --- | --- |
-| **Is** | Drop-in JSON-RPC proxy in front of your existing Arb / OP / Base Sepolia RPC |
-| **Does** | Sim → abort definite revert (`-32080`) or forward; every send decision includes `decision`, `confidence`, `chainId`, decoded revert when present |
-| **Layer 2 (opt)** | Address/spend policy beside sim: allowlist + native caps; outside policy → `-32083` STOP (not fail-open). Default **off** |
-| **Chains** | `arb-sepolia` · `op-sepolia` · `base-sepolia` (no new chains in this release) |
-| **Sim** | Prefer `eth_simulateV1` → fall back to `eth_call`; capability-cache per upstream |
+| **Chains** | `arb-sepolia`, `op-sepolia`, `base-sepolia` only. **Testnet only.** No mainnet SLA. |
+| **Is** | A JSON-RPC proxy in front of your existing RPC |
+| **Submit** | Signed `eth_sendRawTransaction` (and Sync). `eth_sendTransaction` is refused (`-32081`) |
+| **Layer 1** | Sim → abort definite revert (`-32080`) or forward. Uncertain + `GUARD_MODE=strict` → `-32082` |
+| **Layer 2** | Optional allowlist + native caps. Deny → `-32083` `policy_denied` (never fail-open). Default **off** |
+| **Chain check** | Signed `chainId` ≠ selected chain → `-32084` `chain_mismatch` (not forwarded) |
 
-## What it is not
+**Not in this product:** key custody, Safe / Zodiac / ERC-7579, approval unwinding, hosted SaaS, a managed RPC, MEV protection. Those requests are Discussions or a paid SKU, not unlimited Issue debugging. See [SUPPORT.md](./SUPPORT.md).
 
-Not an RPC cloud. Not an indexer. Not revm. Not a Safe/enterprise policy engine. **No key custody** — only signed `eth_sendRawTransaction`; `eth_sendTransaction` is refused (`-32081`). Layer 2 is thin allowlist/caps only.
+## Pin
 
-## Install
-
-```bash
-npm install && npm test && npm run build
-npm start   # http://127.0.0.1:8545
-# or: npx l2-send-guard
-```
+`l2-send-guard@0.5.0` is the version in this tree. **It is not published to npm in this change.** Until it is:
 
 ```bash
-curl -s http://127.0.0.1:8545/health
-# header x-l2sg-chain: arb-sepolia | op-sepolia | base-sepolia | numeric chainId
+git clone https://github.com/yellowgram/l2-safety-proxy.git
+cd l2-safety-proxy
+git checkout <commit>   # record the SHA in your lockfile notes
+npm ci && npm test && npm run build
 ```
 
-## Demo (Arb Sepolia, ~10 min)
-
-Stranger walkthrough + expected PASS transcript: [`docs/INBOUND_DEMO.md`](./docs/INBOUND_DEMO.md).
+When the package is on the registry, install the exact version, not `@latest`:
 
 ```bash
-npm run build
-npm run demo:dual-layer   # offline: -32080 revert abort AND -32083 policy stop
-npm run demo:sepolia
-npm run demo:delta-a   # Base Sepolia abort + faucet attempts (needs .env burner)
-npm run agent:loop     # ≥100 offline agent decisions → docs/agent-decisions.jsonl
-# Offline Layer 1 only: npm run demo:offline
+npm install l2-send-guard@0.5.0
 ```
 
-Expect: **known-revert → abort** with `confidence` + decoded reason; **known-success → forward** when the signer has Sepolia ETH (set `DEMO_PRIVATE_KEY` or use a faucet; if faucet blocks, the script logs and stops that slice).
+There is no tagged binary. A Docker image digest is not published here. Compose is below for people who build the image themselves. Upgrade notes: [CHANGELOG.md](./CHANGELOG.md).
 
-## GUARD_MODE
+## Two install paths
 
-| Mode | Env | Uncertain / missing / low-confidence sim |
+### Human / ops (simulation first)
+
+Layer 2 **off**. Layer 1 `GUARD_MODE=open` (uncertain sims forward). This matches a middleware that must not brick good sends when simulation is flaky.
+
+```bash
+cp .env.example .env
+# leave L2SG_POLICY_ENABLED unset or false
+npm ci && npm test && npm run build && npm start
+# http://127.0.0.1:8545
+```
+
+### Agent MSP (policy is the spend fence)
+
+Layer 2 **on**, with your allowlist. Copy `policy.agent.example.json`, **replace** the `0x1111…` / `0x2222…` placeholders, then:
+
+```bash
+npm run policy:check -- ./policy.json
+# must print policy:check OK — the example file itself is poison and must fail a strict check
+L2SG_POLICY_ENABLED=true L2SG_POLICY_FILE=./policy.json npm start
+```
+
+If policy is enabled and the file is missing, invalid, or still full of placeholders, the process **refuses to start**. It will not silently run with policy off.
+
+`GUARD_MODE` is a separate choice:
+
+| Mode | Uncertain simulation | Risk |
 | --- | --- | --- |
-| **open** (default) | `GUARD_MODE=open` | **fail_open** — forward upstream |
-| **strict** | `GUARD_MODE=strict` | **abort** (`-32082`) — do not forward |
+| `open` (default) | forward (`fail_open`) | A bad agent can still broadcast when sim is unsure |
+| `strict` | abort (`-32082`) | Good sends can brick when the upstream sim is flaky |
 
-Alias: `L2SG_GUARD_MODE`. Legacy: `L2SG_FAIL_OPEN=true|false` when `GUARD_MODE` unset.
+**Policy ON is not a safe agent.** Allowlisting a router, Permit2, or multicall still moves value. Read [docs/RESIDUAL_BYPASSES.md](./docs/RESIDUAL_BYPASSES.md) before the first agent send. Decision table: [docs/AGENT_DECISION_TABLE.md](./docs/AGENT_DECISION_TABLE.md).
 
+`L2SG_HOST` defaults to `127.0.0.1`. Binding `0.0.0.0` without an ACL turns the proxy into an unauthenticated raw-tx forwarder onto your upstream RPC. The process warns when it binds a wildcard.
 
-## Layer 2 — address / spend policy (optional)
+## Error codes
 
-Simulating a send catches definite failures. It does **not** answer “should this address get money at all?” Layer 2 sits **beside** Layer 1:
+| Code | `decision` | Meaning |
+| --- | --- | --- |
+| **-32080** | `abort` | Layer 1: definite revert. Not forwarded. Do not rebroadcast the same raw |
+| **-32081** | `unsigned_refused` | `eth_sendTransaction` refused. No key custody |
+| **-32082** | `abort` | Layer 1: uncertain sim and `GUARD_MODE=strict` |
+| **-32083** | `policy_denied` | Layer 2: destination or cap. Not forwarded. Non-retryable halt |
+| **-32084** | `chain_mismatch` | Signed `chainId` ≠ selected chain. Not a policy deny and not a sim result |
 
-| | |
-| --- | --- |
-| **Within policy** | Continue to Layer 1 sim → auto if sim ok |
-| **Outside policy** | **STOP** (`-32083` `policy_denied`) — do not forward |
-| **Default** | **OFF** — existing fail-open users unchanged |
-| **Config** | `L2SG_POLICY_ENABLED` + `L2SG_POLICY_FILE` / `L2SG_POLICY_ALLOWLIST` / caps (see `.env.example`, `policy.example.json`) |
+**Simulation is not policy.** `-32080` means the tx would revert. `-32083` means the allowlist or cap said no — the tx might have succeeded on chain. Do not “fix” a policy deny by turning Layer 2 off.
 
-Layer 1 uncertain → still fail-open (or strict). Layer 2 deny → always definite stop. Operator keeps keys.
+Stable `error.data` fields: `decision`, `certainty`, `confidence`, `chainId`, `layer` (`1`, `2`, or `null`), `policyCode` (string on `-32083`, otherwise `null`).
 
-**Honesty:** Layer 2 allowlist does **not** unwind `approve` / `setApprovalForAll` / Permit2 / multicall router calldata. Allowlisting a router ≠ destination safety. See [ARCHITECTURE.md](./ARCHITECTURE.md#what-layer-2-is-not).
+Order inside a send: unsigned refuse → chain mismatch → Layer 2 policy (stop, no sim) → Layer 1 sim (abort or forward).
 
-## Confidence (response field)
+## Prove it offline
 
-Every abort / fail_open / forward response includes:
+No keys, no capital, no public RPC. The demo exits non-zero if stdout drifts from the fixture.
 
-| Field | Values |
-| --- | --- |
-| `decision` | `abort` \| `fail_open` \| `forward` |
-| `confidence` | `simulate_v1` \| `eth_call` \| `unknown` (sim method provenance) |
-| `certainty` | `definite` \| `uncertain` |
-| `chainId` | e.g. `421614` |
-| `decoded` | revert reason when present |
+```bash
+npm ci
+npm test
+npm run build
+npm run policy:check          # self-test: examples are poison, clean fixture passes
+npm run demo:dual-layer       # diff vs docs/fixtures/dual-layer.expected.txt
+node examples/agent-viem-halt.mjs
+```
 
-Success / fail-open forwards attach metadata on JSON-RPC extension `l2sg`; aborts put it in `error.data`.
+`/health` reports `guardMode`, `policy.enabled`, `policy.destinationCount` (not the addresses), and `policy.notifyConfigured` (`true`/`false`).
 
-## Evidence
+Troubleshooting: [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md). Decision log schema: [docs/DECISION_LOG.md](./docs/DECISION_LOG.md).
 
-Send decisions: [docs/SEND_LOG.md](./docs/SEND_LOG.md). Architecture: [ARCHITECTURE.md](./ARCHITECTURE.md).
+## Docker
 
+Build locally. Publish **localhost** on the host. The process inside the container binds `0.0.0.0` so Docker can proxy the port, and it prints the wildcard warning.
 
-## Agent drop-in (viem / AgentKit)
+```bash
+docker compose up --build
+# host: http://127.0.0.1:8545/health
+```
 
-Point your wallet client’s HTTP transport at the proxy — signing stays local (no custody):
+The compose file mounts `policy.agent.example.json` read-only at `/policy/policy.json` and leaves Layer 2 off. Enable Layer 2 only after you replace placeholders and `policy:check` passes. Do not publish `0.0.0.0:8545:8545`.
+
+## Agent transport
+
+Point HTTP at the proxy. The halt sample never calls `eth_sendTransaction`:
+
+```bash
+node examples/agent-viem-halt.mjs
+```
 
 ```ts
 import { http } from "viem";
@@ -109,24 +141,20 @@ const transport = http(
 );
 ```
 
-Full example: [`examples/agentkit-viem.ts`](./examples/agentkit-viem.ts).  
-Agent policy template: [`policy.agent.example.json`](./policy.agent.example.json).  
-*Sim ≠ policy* positioning: [`docs/COMPETITIVE.md`](./docs/COMPETITIVE.md).
+`-32083` → stop the loop. `-32080` → do not send that raw again. Table: [docs/AGENT_DECISION_TABLE.md](./docs/AGENT_DECISION_TABLE.md). Wiring notes: [`examples/agentkit-viem.ts`](./examples/agentkit-viem.ts), [`src/sdk/README.md`](./src/sdk/README.md).
 
-## Paid support (optional)
+## GUARD_MODE
 
-OSS core stays free. Fixed SKUs (AgentKit wire-up, policy pack review, priority retainer): [`SUPPORT.md`](./SUPPORT.md).  
-Reply on GitHub Issues / Discussions, or email `CONTACT_EMAIL_TBA`. Demo first: [`docs/INBOUND_DEMO.md`](./docs/INBOUND_DEMO.md).
+| Mode | Env | Uncertain / missing sim |
+| --- | --- | --- |
+| **open** (default) | `GUARD_MODE=open` | **fail_open** — forward upstream |
+| **strict** | `GUARD_MODE=strict` | **abort** (`-32082`) |
 
-## Client probes
+Alias: `L2SG_GUARD_MODE`. Legacy `L2SG_FAIL_OPEN` applies only when `GUARD_MODE` is unset, and stays through 0.6.0. It does not affect `-32083`.
 
-Read-only check for Reth `#27342` (`eth_call` vs `eth_estimateGas` under `--rpc.gascap`):
+## Other checks
 
-```bash
-RETH_BIN=$(which reth) npm run probe:gascap
-```
-
-Exit `2` = split (call capped/OOG, estimate returns gas > cap). No keys, no broadcast. Design notes: [docs/drafts/27342-design.md](./docs/drafts/27342-design.md).
+Read-only Reth gas-cap probe (no keys, no broadcast): `RETH_BIN=$(which reth) npm run probe:gascap`. Notes: [docs/drafts/27342-design.md](./docs/drafts/27342-design.md).
 
 ## License
 

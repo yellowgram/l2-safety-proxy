@@ -135,6 +135,10 @@ See [`examples/agentkit-viem.ts`](../../examples/agentkit-viem.ts) — pass Guar
 
 **CDP Policy Engine** (hosted allowlist / `ethValue`) is complementary. Guard adds **Layer 1 definite-revert simulation** and **self-hosted** Layer 2 for local-sign / non-CDP RPC paths. We do not replace CDP. Competitive one-pager: [docs/COMPETITIVE.md](../../docs/COMPETITIVE.md).
 
-## Layer 2
+## Layer 2 and halt
 
-When the proxy has policy enabled, denials surface as `-32083` with `data.layer: 2` and `data.decision: "policy_denied"`. Agent template: [`policy.agent.example.json`](../../policy.agent.example.json).
+When the proxy has policy enabled, denials surface as `-32083` with `data.layer: 2`, `data.decision: "policy_denied"`, and `data.policyCode`. Treat that as a non-retryable halt. `-32080` means do not rebroadcast the same raw. Never send `eth_sendTransaction` (`-32081`). Signed `chainId` ≠ selected chain is `-32084` (`isChainMismatchError`).
+
+Offline sample: [`examples/agent-viem-halt.mjs`](../../examples/agent-viem-halt.mjs).  
+Decision table: [`docs/AGENT_DECISION_TABLE.md`](../../docs/AGENT_DECISION_TABLE.md).  
+Agent template (poison placeholders — replace before use): [`policy.agent.example.json`](../../policy.agent.example.json).

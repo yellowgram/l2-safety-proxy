@@ -1,20 +1,40 @@
+# Human/ops default: Layer 2 OFF, host publish is localhost only.
+#
+# The process binds 0.0.0.0 *inside* the container so Docker's port proxy can
+# reach it. That is not a public bind on the host. Do not change the publish
+# line to "8545:8545" — that exposes an unauthenticated raw-tx forwarder.
+#
+# Agent MSP: replace placeholders in a copy of the policy file, run
+# `npm run policy:check -- ./policy.json`, then set:
+#   L2SG_POLICY_ENABLED: "true"
+#   L2SG_POLICY_FILE: /policy/policy.json
+# The example mounted below is poison and the process will refuse to start
+# if you enable it unchanged.
 services:
   l2-send-guard:
     build: .
     ports:
-      - "8545:8545"
+      - "127.0.0.1:8545:8545"
     environment:
       L2SG_HOST: "0.0.0.0"
       L2SG_PORT: "8545"
-      L2SG_FAIL_OPEN: "true"
+      GUARD_MODE: "open"
+      L2SG_POLICY_ENABLED: "false"
       L2SG_CHAINS: "arb-sepolia,op-sepolia,base-sepolia"
       L2SG_DEFAULT_CHAIN: "arb-sepolia"
-      # Optional overrides — use public defaults if unset
       # L2SG_RPC_ARB_SEPOLIA: https://sepolia-rollup.arbitrum.io/rpc
       # L2SG_RPC_BASE_SEPOLIA: https://sepolia.base.org
       # L2SG_RPC_OP_SEPOLIA: https://sepolia.optimism.io
+    volumes:
+      - ./policy.agent.example.json:/policy/policy.json:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8545/health"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8545/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 10s
       timeout: 3s
       retries: 3
