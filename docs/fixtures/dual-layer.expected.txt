@@ -1,0 +1,17 @@
+L2 Send Guard dual-layer offline transcript
+order: chain-select -> unsigned -32081 -> chain-mismatch -32084 -> policy -32083 (no sim) -> sim abort -32080
+CHAIN_SELECT header=arb-sepolia code=-32081 chainId=421614 forwarded=0
+CHAIN_SELECT header=op-sepolia code=-32081 chainId=11155420 forwarded=0
+CHAIN_SELECT header=base-sepolia code=-32081 chainId=84532 forwarded=0
+CHAIN_SELECT header=84532 code=-32081 chainId=84532 forwarded=0
+UNSIGNED code=-32081 decision=unsigned_refused layer=null chainId=421614 signedChainId=null certainty=definite confidence=unknown policyCode=null forwarded=0
+CHAIN_MISMATCH code=-32084 decision=chain_mismatch layer=null chainId=11155420 signedChainId=421614 certainty=definite confidence=unknown policyCode=null forwarded=0
+L2_DENY code=-32083 decision=policy_denied layer=2 chainId=421614 signedChainId=null certainty=definite confidence=unknown policyCode=DESTINATION_NOT_ALLOWLISTED forwarded=0
+L2_HEALTH policy.enabled=true destinationCount=1 notifyConfigured=false
+L1_ABORT code=-32080 decision=abort layer=1 chainId=421614 signedChainId=null certainty=definite confidence=eth_call policyCode=null forwarded=0
+-32080 definite-revert abort: PASS
+-32081 unsigned refusal: PASS
+-32083 policy_denied stop: PASS
+-32084 chain mismatch: PASS
+chain-select arb/op/base: PASS
+Demo OK — Layer 1 aborts definite reverts; Layer 2 policy never fail-opens.

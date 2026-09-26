@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  ERR_CHAIN_MISMATCH,
   ERR_DEFINITE_REVERT,
   ERR_POLICY_DENIED,
   ERR_STRICT_UNCERTAIN,
@@ -7,6 +8,7 @@ import {
   classifyGuardError,
   guardErrorCode,
   guardErrorData,
+  isChainMismatchError,
   isDefiniteRevertError,
   isGuardAbortError,
   isPolicyDeniedError,
@@ -21,6 +23,10 @@ describe("sdk typed guard errors", () => {
     expect(isStrictUncertainError({ code: ERR_STRICT_UNCERTAIN })).toBe(true);
     expect(isUnsignedSendRefusedError({ code: ERR_UNSIGNED_SEND_REFUSED })).toBe(
       true
+    );
+    expect(isChainMismatchError({ code: ERR_CHAIN_MISMATCH })).toBe(true);
+    expect(classifyGuardError({ code: ERR_CHAIN_MISMATCH })).toBe(
+      "chain_mismatch"
     );
     expect(classifyGuardError({ code: ERR_POLICY_DENIED })).toBe(
       "policy_denied"
@@ -51,6 +57,7 @@ describe("sdk typed guard errors", () => {
       ERR_POLICY_DENIED,
       ERR_STRICT_UNCERTAIN,
       ERR_UNSIGNED_SEND_REFUSED,
+      ERR_CHAIN_MISMATCH,
     ]) {
       expect(isGuardAbortError({ code })).toBe(true);
     }

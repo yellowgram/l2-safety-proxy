@@ -6,17 +6,17 @@ labels: good first issue, help wanted
 ---
 
 **Why this is a good first issue**
-- Touches docs/tests or a small typed surface; no custody / mainnet / grants.
+- Touches docs, tests, or a small typed surface. No custody, mainnet, or grants.
 
 **Task**
--
 
-**Acceptance criteria**
+**Acceptance**
 - [ ] `npm test` passes
-- [ ] Docs updated if behavior/UX changes
+- [ ] `npm run policy:check` and `npm run demo:dual-layer` pass if behavior or the demo changed
+- [ ] Docs updated if behavior changes
 - [ ] No secrets committed
 
 **Pointers**
-- Demo: `docs/DEMO.md`
-- Offline proof: `node scripts/demo-offline.mjs`
+- Offline transcript: `docs/fixtures/dual-layer.expected.txt`
+- Decision table: `docs/AGENT_DECISION_TABLE.md`
 - Architecture: `ARCHITECTURE.md`

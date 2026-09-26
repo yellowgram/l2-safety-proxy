@@ -14,12 +14,14 @@ export {
 } from "./provider.js";
 
 export {
+  ERR_CHAIN_MISMATCH,
   ERR_DEFINITE_REVERT,
   ERR_POLICY_DENIED,
   ERR_STRICT_UNCERTAIN,
   ERR_UNSIGNED_SEND_REFUSED,
   guardErrorCode,
   guardErrorData,
+  isChainMismatchError,
   isDefiniteRevertError,
   isPolicyDeniedError,
   isStrictUncertainError,

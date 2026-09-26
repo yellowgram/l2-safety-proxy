@@ -76,11 +76,14 @@ npm run demo:dual-layer    # -32080 + -32083
 node scripts/demo-offline.mjs   # Layer 1 abort + fail-open only
 ```
 
-Dual-layer expected summary:
+Dual-layer expected summary (full file: `docs/fixtures/dual-layer.expected.txt`):
 
 ```text
 -32080 definite-revert abort: PASS
--32083 policy_denied stop:    PASS
+-32081 unsigned refusal: PASS
+-32083 policy_denied stop: PASS
+-32084 chain mismatch: PASS
+chain-select arb/op/base: PASS
 ```
 
 Layer-1-only offline expected summary:

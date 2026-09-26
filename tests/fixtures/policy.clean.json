@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "allowContractCreation": false,
+  "allowAnyDestination": false,
+  "globalMaxNativeWei": "1000000000000000",
+  "destinations": {
+    "0x0000000000000000000000000000000000000001": {
+      "maxNativeWei": "1000"
+    }
+  },
+  "erc20RecipientCheck": true,
+  "humanGate": {
+    "mode": "stop",
+    "notifyUrl": null
+  }
+}

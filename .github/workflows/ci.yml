@@ -9,12 +9,16 @@ jobs:
   test-and-demo:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install
@@ -26,5 +30,14 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Offline abort + fail-open demo
+      - name: policy:check (example poison + clean fixture)
+        run: npm run policy:check
+
+      - name: Offline dual-layer demo
+        run: npm run demo:dual-layer
+
+      - name: Agent halt sample
+        run: node examples/agent-viem-halt.mjs
+
+      - name: Offline Layer 1 abort + fail-open demo
         run: npm run demo:offline

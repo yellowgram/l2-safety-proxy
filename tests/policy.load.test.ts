@@ -10,6 +10,7 @@ const ENV_KEYS = [
   "L2SG_POLICY_ALLOWLIST",
   "L2SG_POLICY_GLOBAL_MAX_WEI",
   "L2SG_POLICY_ALLOW_ANY",
+  "L2SG_POLICY_ALLOW_CREATE",
   "L2SG_POLICY_NOTIFY_URL",
 ] as const;
 
@@ -27,13 +28,13 @@ describe("loadSpendPolicy", () => {
   it("enables from env allowlist", () => {
     process.env.L2SG_POLICY_ENABLED = "true";
     process.env.L2SG_POLICY_ALLOWLIST =
-      "0x1111111111111111111111111111111111111111";
+      "0x0000000000000000000000000000000000000001";
     process.env.L2SG_POLICY_GLOBAL_MAX_WEI = "1000";
     const p = loadSpendPolicy();
     expect(p.enabled).toBe(true);
     expect(p.globalMaxNativeWei).toBe(1000n);
     expect(
-      p.destinations.has("0x1111111111111111111111111111111111111111")
+      p.destinations.has("0x0000000000000000000000000000000000000001")
     ).toBe(true);
   });
 
@@ -45,7 +46,7 @@ describe("loadSpendPolicy", () => {
         enabled: true,
         globalMaxNativeWei: "500",
         destinations: {
-          "0x2222222222222222222222222222222222222222": {
+          "0x00000000000000000000000000000000000000aa": {
             maxNativeWei: "100",
           },
         },
@@ -58,9 +59,143 @@ describe("loadSpendPolicy", () => {
       expect(p.enabled).toBe(true);
       expect(p.globalMaxNativeWei).toBe(999n);
       expect(
-        p.destinations.get("0x2222222222222222222222222222222222222222")
+        p.destinations.get("0x00000000000000000000000000000000000000aa")
           ?.maxNativeWei
       ).toBe(100n);
+    } finally {
+      unlinkSync(path);
+    }
+  });
+
+  it("refuses to start when policy is enabled without a file or allowlist", () => {
+    process.env.L2SG_POLICY_ENABLED = "true";
+    expect(() => loadSpendPolicy()).toThrow(/Refusing to start/);
+  });
+
+  it("refuses a missing policy file instead of disabling policy", () => {
+    process.env.L2SG_POLICY_FILE = join(tmpdir(), "l2sg-missing-policy.json");
+    expect(() => loadSpendPolicy()).toThrow(/Failed to load L2SG_POLICY_FILE/);
+  });
+
+  it("refuses placeholder destinations when policy is enabled", () => {
+    process.env.L2SG_POLICY_ENABLED = "true";
+    process.env.L2SG_POLICY_ALLOWLIST =
+      "0x1111111111111111111111111111111111111111";
+    expect(() => loadSpendPolicy()).toThrow(/placeholder/i);
+  });
+
+  it("refuses allowAnyDestination when policy is enabled", () => {
+    const path = join(tmpdir(), `l2sg-any-${Date.now()}.json`);
+    writeFileSync(
+      path,
+      JSON.stringify({
+        enabled: true,
+        allowAnyDestination: true,
+        destinations: {
+          "0x0000000000000000000000000000000000000001": {},
+        },
+      })
+    );
+    try {
+      process.env.L2SG_POLICY_FILE = path;
+      expect(() => loadSpendPolicy()).toThrow(/allowAnyDestination/);
+    } finally {
+      unlinkSync(path);
+    }
+  });
+
+  it("refuses when env enables a file that sets allowAnyDestination", () => {
+    const path = join(tmpdir(), `l2sg-any-env-${Date.now()}.json`);
+    writeFileSync(
+      path,
+      JSON.stringify({
+        enabled: false,
+        allowAnyDestination: true,
+        destinations: {
+          "0x0000000000000000000000000000000000000001": {},
+        },
+      })
+    );
+    try {
+      process.env.L2SG_POLICY_FILE = path;
+      process.env.L2SG_POLICY_ENABLED = "true";
+      expect(() => loadSpendPolicy()).toThrow(/allowAnyDestination/);
+    } finally {
+      unlinkSync(path);
+    }
+  });
+
+  it("refuses L2SG_POLICY_ALLOW_ANY when policy is enabled", () => {
+    process.env.L2SG_POLICY_ENABLED = "true";
+    process.env.L2SG_POLICY_ALLOWLIST =
+      "0x0000000000000000000000000000000000000001";
+    process.env.L2SG_POLICY_ALLOW_ANY = "true";
+    expect(() => loadSpendPolicy()).toThrow(/allowAnyDestination/);
+  });
+
+  it("refuses an enabled chain overlay with allowAnyDestination", () => {
+    const path = join(tmpdir(), `l2sg-any-overlay-${Date.now()}.json`);
+    writeFileSync(
+      path,
+      JSON.stringify({
+        enabled: true,
+        destinations: {
+          "0x0000000000000000000000000000000000000001": {},
+        },
+        chains: {
+          "arb-sepolia": { allowAnyDestination: true },
+        },
+      })
+    );
+    try {
+      process.env.L2SG_POLICY_FILE = path;
+      expect(() => loadSpendPolicy()).toThrow(/allowAnyDestination/);
+    } finally {
+      unlinkSync(path);
+    }
+  });
+
+  it("allows allowAnyDestination in a file that stays disabled", () => {
+    const path = join(tmpdir(), `l2sg-any-off-${Date.now()}.json`);
+    writeFileSync(
+      path,
+      JSON.stringify({
+        enabled: false,
+        allowAnyDestination: true,
+        destinations: {},
+      })
+    );
+    try {
+      process.env.L2SG_POLICY_FILE = path;
+      const p = loadSpendPolicy();
+      expect(p.enabled).toBe(false);
+      expect(p.allowAnyDestination).toBe(true);
+    } finally {
+      unlinkSync(path);
+    }
+  });
+
+  it("refuses an env allowlist entry that is not an address", () => {
+    process.env.L2SG_POLICY_ENABLED = "true";
+    process.env.L2SG_POLICY_ALLOWLIST = "not-an-address";
+    expect(() => loadSpendPolicy()).toThrow(/not 0x \+ 40 hex/);
+  });
+
+  it("loads a disabled file that still contains placeholders", () => {
+    const path = join(tmpdir(), `l2sg-poison-off-${Date.now()}.json`);
+    writeFileSync(
+      path,
+      JSON.stringify({
+        enabled: false,
+        destinations: {
+          "0x2222222222222222222222222222222222222222": {},
+        },
+      })
+    );
+    try {
+      process.env.L2SG_POLICY_FILE = path;
+      const p = loadSpendPolicy();
+      expect(p.enabled).toBe(false);
     } finally {
       unlinkSync(path);
     }

@@ -9,6 +9,7 @@ import type {
   SimResult,
 } from "../types/index.js";
 import {
+  ERR_CHAIN_MISMATCH,
   ERR_DEFINITE_REVERT,
   ERR_POLICY_DENIED,
   ERR_STRICT_UNCERTAIN,
@@ -23,6 +24,7 @@ import { forwardRaw } from "../sim/rpcClient.js";
 import { simulateRawTransaction } from "../sim/simulator.js";
 import { parseRawTransaction } from "../sim/txParse.js";
 import { recordDecision } from "./counters.js";
+import { appendDecisionLog, type DecisionLogRecord } from "./decisionLog.js";
 
 export type SimulateFn = (
   chain: ChainConfig,
@@ -72,6 +74,7 @@ function buildMeta(
     chainId: chain.chainId,
     simMethod: sim.method,
     layer: 1,
+    policyCode: null,
     ...extras,
   };
   if (!sim.ok) {
@@ -92,9 +95,37 @@ function buildMeta(
   return meta;
 }
 
+function writeDecisionLog(
+  config: GuardConfig,
+  chain: ChainConfig,
+  chainKey: string,
+  method: string,
+  meta: GuardResponseMeta,
+  code: number | null
+): void {
+  const record: DecisionLogRecord = {
+    ts: new Date().toISOString(),
+    decision: meta.decision,
+    code,
+    chainId: chain.chainId,
+    chainKey,
+    layer: meta.layer ?? null,
+    policyCode: meta.policyCode ?? null,
+    certainty: meta.certainty,
+    confidence: meta.confidence,
+    failOpen: Boolean(meta.failOpen),
+    method,
+  };
+  if (meta.signedChainId != null) record.signedChainId = meta.signedChainId;
+  appendDecisionLog(config.decisionLogPath, record);
+}
+
 function abortResponse(
+  config: GuardConfig,
   id: JsonRpcRequest["id"],
   chain: ChainConfig,
+  chainKey: string,
+  method: string,
   sim: Extract<SimResult, { ok: false }>,
   decision: GuardDecision = "abort"
 ): JsonRpcResponse {
@@ -105,6 +136,7 @@ function abortResponse(
     failOpen: false,
   });
   recordDecision(decision);
+  writeDecisionLog(config, chain, chainKey, method, meta, code);
   return {
     jsonrpc: "2.0",
     id,
@@ -117,8 +149,11 @@ function abortResponse(
 }
 
 function policyDeniedResponse(
+  config: GuardConfig,
   id: JsonRpcRequest["id"],
   chain: ChainConfig,
+  chainKey: string,
+  method: string,
   opts: {
     reason: string;
     policyCode: string;
@@ -144,6 +179,7 @@ function policyDeniedResponse(
     hint: "Update Layer 2 policy allowlist/caps or disable L2SG_POLICY_ENABLED. Operator keeps keys.",
   };
   recordDecision("policy_denied");
+  writeDecisionLog(config, chain, chainKey, method, meta, ERR_POLICY_DENIED);
   return {
     jsonrpc: "2.0",
     id,
@@ -156,18 +192,32 @@ function policyDeniedResponse(
 }
 
 function attachL2sg(
+  config: GuardConfig,
   res: JsonRpcResponse,
+  chain: ChainConfig,
+  chainKey: string,
+  method: string,
   meta: GuardResponseMeta
 ): JsonRpcResponse {
   recordDecision(meta.decision);
+  writeDecisionLog(config, chain, chainKey, method, meta, null);
   return { ...res, l2sg: meta };
 }
 
 /**
- * Core middleware:
- * parse → Layer 2 policy (if enabled) → Layer 1 simulate → abort or fail-open/forward.
+ * Core middleware, in order:
+ * 1. Resolve chain from `x-l2sg-chain` (key or numeric id) or the default chain.
+ * 2. Refuse `eth_sendTransaction` (-32081). No parse, no sim, no forward.
+ * 3. Parse the signed raw tx. If `chainId` is present and ≠ the selected chain,
+ *    stop with -32084 `chain_mismatch` (no sim, no policy, no forward).
+ *    Legacy txs with no chainId are not compared.
+ *    If policy is enabled and the raw tx does not parse, stop with -32083
+ *    `TX_UNPARSEABLE` (do not fail-open). Policy off keeps the Layer 1 path.
+ * 4. If Layer 2 policy is enabled, evaluate allowlist + caps. Deny → -32083
+ *    `policy_denied` and do not simulate. Policy denials never fail-open.
+ * 5. Layer 1 simulate. Definite revert → -32080 abort (no forward).
+ *    Uncertain → fail-open forward when GUARD_MODE=open, else -32082.
  *
- * Layer 2 denials are definite stops (-32083), never fail-open.
  * GUARD_MODE only affects Layer 1 simulation uncertainty.
  */
 export async function handleRequest(
@@ -200,6 +250,23 @@ export async function handleRequest(
   }
 
   if (UNSIGNED_SEND_METHODS.has(req.method)) {
+    const meta: GuardResponseMeta = {
+      l2SendGuard: true,
+      decision: "unsigned_refused",
+      confidence: "unknown",
+      certainty: "definite",
+      chainId: chain.chainId,
+      simMethod: "unavailable",
+      layer: null,
+      policyCode: null,
+      aborted: true,
+      failOpen: false,
+      code: "UNSIGNED_SEND_REFUSED",
+      reason: "eth_sendTransaction refused — no key custody",
+      hint: "Point your JSON-RPC URL at this proxy; keep signing in your wallet/agent. See docs/AGENTS.md.",
+    };
+    recordDecision("unsigned_refused");
+    writeDecisionLog(config, chain, chainKey, req.method, meta, ERR_UNSIGNED_SEND_REFUSED);
     return {
       jsonrpc: "2.0",
       id: req.id,
@@ -208,12 +275,9 @@ export async function handleRequest(
         message:
           "L2 Send Guard: eth_sendTransaction refused — no key custody. Sign externally and submit via eth_sendRawTransaction.",
         data: {
-          l2SendGuard: true,
+          ...meta,
           refused: true,
-          code: "UNSIGNED_SEND_REFUSED",
           useMethod: "eth_sendRawTransaction",
-          hint: "Point your JSON-RPC URL at this proxy; keep signing in your wallet/agent. See docs/AGENTS.md.",
-          chainId: chain.chainId,
         },
       },
     };
@@ -235,35 +299,83 @@ export async function handleRequest(
     };
   }
 
-  // Layer 2: parse → policy (before sim). Unparseable txs skip policy and use Layer 1 path.
+  // Parse once. Failure with policy on is a definite stop (the fence cannot run).
+  // Failure with policy off keeps the Layer 1 path.
+  let parsed: ReturnType<typeof parseRawTransaction> | undefined;
+  try {
+    parsed = parseRawTransaction(raw as Hex);
+  } catch {
+    parsed = undefined;
+  }
+
+  if (!parsed && config.policy?.enabled) {
+    return policyDeniedResponse(config, req.id, chain, chainKey, req.method, {
+      reason: "signed transaction could not be parsed; Layer 2 policy was not evaluated",
+      policyCode: "TX_UNPARSEABLE",
+      valueWei: 0n,
+    });
+  }
+
+  if (
+    parsed?.tx.chainId != null &&
+    parsed.tx.chainId !== chain.chainId
+  ) {
+    const meta: GuardResponseMeta = {
+      l2SendGuard: true,
+      decision: "chain_mismatch",
+      confidence: "unknown",
+      certainty: "definite",
+      chainId: chain.chainId,
+      signedChainId: parsed.tx.chainId,
+      simMethod: "unavailable",
+      layer: null,
+      policyCode: null,
+      aborted: true,
+      failOpen: false,
+      code: "CHAIN_MISMATCH",
+      reason: `signed chainId ${parsed.tx.chainId} does not match selected chain ${chain.chainId} (${chainKey})`,
+      hint: "Set x-l2sg-chain to the chain you signed, or re-sign for the selected chain. Not forwarded.",
+    };
+    recordDecision("chain_mismatch");
+    writeDecisionLog(config, chain, chainKey, req.method, meta, ERR_CHAIN_MISMATCH);
+    return {
+      jsonrpc: "2.0",
+      id: req.id,
+      error: {
+        code: ERR_CHAIN_MISMATCH,
+        message: `L2 Send Guard: chain_mismatch — ${meta.reason}`,
+        data: meta,
+      },
+    };
+  }
+
   const policy = config.policy;
-  if (policy?.enabled) {
-    try {
-      const parsed = parseRawTransaction(raw as Hex);
-      const check = evaluateSpendPolicy(policy, {
-        chainKey,
-        chainId: chain.chainId,
-        to: parsed.to,
-        value: parsed.value,
-        data: parsed.data,
-      });
-      if (!check.allow) {
-        notifyPolicyDenied(policy, {
+  if (policy?.enabled && parsed) {
+    const check = evaluateSpendPolicy(policy, {
+      chainKey,
+      chainId: chain.chainId,
+      to: parsed.to,
+      value: parsed.value,
+      data: parsed.data,
+    });
+    if (!check.allow) {
+      notifyPolicyDenied(
+        policy,
+        {
           chainKey,
           chainId: chain.chainId,
           to: parsed.to,
           value: parsed.value,
           data: parsed.data,
-        }, check);
-        return policyDeniedResponse(req.id, chain, {
-          reason: check.reason ?? "policy denied",
-          policyCode: check.code ?? "DESTINATION_NOT_ALLOWLISTED",
-          to: check.effectiveTo ?? parsed.to,
-          valueWei: check.valueWei,
-        });
-      }
-    } catch {
-      // parse failure → fall through to simulate (uncertain / fail-open semantics)
+        },
+        check
+      );
+      return policyDeniedResponse(config, req.id, chain, chainKey, req.method, {
+        reason: check.reason ?? "policy denied",
+        policyCode: check.code ?? "DESTINATION_NOT_ALLOWLISTED",
+        to: check.effectiveTo ?? parsed.to,
+        valueWei: check.valueWei,
+      });
     }
   }
 
@@ -281,38 +393,50 @@ export async function handleRequest(
     if (config.guardMode === "open") {
       const upstream = await forward(chain.upstreamRpcUrl, req);
       return attachL2sg(
+        config,
         upstream,
+        chain,
+        chainKey,
+        req.method,
         buildMeta(chain, "fail_open", thrown, { failOpen: true, aborted: false })
       );
     }
-    return abortResponse(req.id, chain, thrown);
+    return abortResponse(config, req.id, chain, chainKey, req.method, thrown);
   }
 
   // Success path → forward
   if (sim.ok) {
     const upstream = await forward(chain.upstreamRpcUrl, req);
     return attachL2sg(
+      config,
       upstream,
+      chain,
+      chainKey,
+      req.method,
       buildMeta(chain, "forward", sim, { aborted: false, failOpen: false })
     );
   }
 
   // Definite revert → abort (never forward)
   if (sim.confidence === "definite" && sim.code === "DEFINITE_REVERT") {
-    return abortResponse(req.id, chain, sim, "abort");
+    return abortResponse(config, req.id, chain, chainKey, req.method, sim, "abort");
   }
 
   // Uncertain / sim failure
   if (config.guardMode === "open") {
     const upstream = await forward(chain.upstreamRpcUrl, req);
     return attachL2sg(
+      config,
       upstream,
+      chain,
+      chainKey,
+      req.method,
       buildMeta(chain, "fail_open", sim, { failOpen: true, aborted: false })
     );
   }
 
   // strict: abort on missing / unknown / low-confidence
-  return abortResponse(req.id, chain, sim, "abort");
+  return abortResponse(config, req.id, chain, chainKey, req.method, sim, "abort");
 }
 
 export async function handlePayload(

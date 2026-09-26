@@ -73,6 +73,8 @@ Day-one config templates:
 
 Select chain per request via `x-l2sg-chain: arb-sepolia` (or numeric chain id). This is explicitly **not** OP-only.
 
+If the signed transaction includes a `chainId` and it disagrees with the selected chain, the proxy returns `-32084` `chain_mismatch` and does not simulate or forward. Legacy transactions with no `chainId` are not compared. Send order: unsigned refuse → if policy is enabled and the raw tx does not parse, `-32083` `TX_UNPARSEABLE` → chain mismatch → Layer 2 policy (if enabled) → Layer 1 simulation.
+
 
 ## Layer 1 vs Layer 2
 
@@ -84,7 +86,7 @@ Select chain per request via `x-l2sg-chain: arb-sepolia` (or numeric chain id). 
 ### What Layer 2 is
 
 - Optional config-driven **allowlist**, **per-destination / global native wei caps**, optional `requireApproval` + fire-and-forget notify hook.
-- Within policy (after Layer 1 pass) = auto forward.
+- Inside the allowlist and under the cap, the send still goes through Layer 1. It forwards only when simulation does not abort.
 - Outside policy = STOP; operator keeps keys and updates config.
 - Best-effort ERC20 `transfer` / `transferFrom` **recipient** allowlist check (no ERC20 amount caps).
 
@@ -106,7 +108,7 @@ Even with Layer 2 **ON**, these paths can move value or authority **without** th
 | **Multicall** / aggregators / routers | `tx.to` is the router; inner targets are in calldata — we do **not** unwind |
 | Eth sent to a contract that forwards | Native `to` is allowlisted; onward calls are out of scope |
 
-Document these to operators; do not claim “policy ON = safe agent.” Optional future selector denylist stays **OFF-by-default** (see feature-addon backlog).
+Document these to operators; do not claim “policy ON = safe agent.” One-pager: [docs/RESIDUAL_BYPASSES.md](./docs/RESIDUAL_BYPASSES.md). Optional future selector denylist stays **OFF-by-default** (see feature-addon backlog).
 
 Enable via `L2SG_POLICY_ENABLED=true` and/or `L2SG_POLICY_FILE` (see `policy.example.json`, `policy.agent.example.json`).
 

@@ -9,6 +9,7 @@ Synthetic corpus + runner for L2 Send Guard decision classes. **No live broadcas
 | **Path** | `evaluation/fixtures/corpus.jsonl` |
 | **Size** | ~340 fixtures (band 200–500; includes Layer 2 `policy_denied`) |
 | **Source** | Deterministic generator: `npm run eval:generate` |
+| **Chain** | Every row is `arb-sepolia` / chainId `421614`. The committed raw transaction is signed for that chain. OP and Base labels are not in this corpus. |
 
 Decision classes (weekly METRICS):
 
@@ -18,6 +19,7 @@ Decision classes (weekly METRICS):
 | `probable` | Uncertain revert → `fail_open` (open) or abort (strict) |
 | `forward` | Sim success → forward |
 | `infra_abort` | Sim infra failure / throw aborted (strict) |
+| `policy_denied` | Layer 2 deny before simulation (`-32083`) |
 
 ## Run
 
