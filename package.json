@@ -51,7 +51,11 @@
   "bugs": {
     "url": "https://github.com/yellowgram/l2-safety-proxy/issues"
   },
-  "homepage": "https://github.com/yellowgram/l2-safety-proxy#readme",
+  "homepage": "https://www.yellowgram.dev/oss",
+  "author": {
+    "name": "yellowgram",
+    "url": "https://www.yellowgram.dev"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
