@@ -36,6 +36,7 @@ describe("decodeRevertData", () => {
     [0x32n, /out of bounds/i],
     [0x00n, /generic panic/i],
     [0x21n, /enum/i],
+    [0x22n, /storage encoding/i],
     [0x31n, /pop on empty/i],
     [0x41n, /memory/i],
     [0x51n, /uninitialized/i],
