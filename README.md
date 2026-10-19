@@ -164,3 +164,7 @@ Read-only Reth gas-cap probe (no keys, no broadcast): `RETH_BIN=$(which reth) np
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+---
+
+Part of yellowgram open source tools: https://www.yellowgram.dev/oss
