@@ -1,5 +1,5 @@
 import { toFunctionSelector, zeroAddress, type Address, type Hex } from "viem";
-import { EFFECTIVELY_UNLIMITED, NonCanonicalAbi, UINT160_MAX, decodeKnown, selectorOf } from "../abi.js";
+import { EFFECTIVELY_UNLIMITED, MAX_CALLDATA_BYTES, NonCanonicalAbi, UINT160_MAX, decodeKnown, selectorOf } from "../abi.js";
 import { DecodeDenied, UR_WETH, flattenCalls, type Leaf } from "../calls.js";
 import type { Authorization } from "../tx.js";
 import { permit2For } from "./load.js";
@@ -72,6 +72,11 @@ export function evaluateTx(policy: Policy, tx: TxInput, opts: EvaluateOptions): 
 let warnings: string[] = [];
 
 function run(policy: Policy, tx: TxInput, opts: EvaluateOptions, spend: Spend) {
+  // Checked before anything is decoded: no legitimate send needs more, and decoding is the expensive part.
+  const bytes = (tx.data.length - 2) / 2;
+  if (bytes > MAX_CALLDATA_BYTES) {
+    throw new Deny("CALLDATA_TOO_LARGE", `calldata is ${bytes} bytes; the guard decodes at most ${MAX_CALLDATA_BYTES}`);
+  }
   const chainId = opts.chainId;
   if (policy.chains.size > 0 && !policy.chains.has(chainId)) {
     throw new Deny("CHAIN_NOT_ALLOWED", `chain ${chainId} is not in the policy's chains list`);

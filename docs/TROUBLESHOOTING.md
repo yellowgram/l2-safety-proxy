@@ -35,7 +35,10 @@ the codes. The usual causes:
   moves it out. End the plan with `SWEEP` (or `UNWRAP_WETH` for WETH) to `MSG_SENDER`.
 - `NON_CANONICAL_ABI`: the calldata isn't the exact standard ABI encoding the target reads. Usually extra bytes
   appended after the arguments (an attribution suffix, for example), or a Universal Router V3 path with leftover
-  bytes. Encode it with a standard encoder and send it without a suffix.
+  bytes. Encode it with a standard encoder and send it without a suffix. If every Universal Router swap gets
+  this code, the calldata is built for Universal Router 2.1 or later, which the guard doesn't read (README,
+  limits). Build it for a 2.0 router and send it there, or don't route swaps through the guard yet.
+- `CALLDATA_TOO_LARGE`: the transaction carries more than 128 KiB of calldata. Split the batch.
 
 ## -32082 (simulation couldn't decide)
 

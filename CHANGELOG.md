@@ -56,8 +56,21 @@ on it, so allowlisting a contract such as a DEX router allowed all of its functi
   - A Universal Router V3 path must be 20 + 23·k bytes (k ≥ 1): a token, then fee + token per pool. The router
     reads a path shorter than 66 bytes as one pool and ignores the rest, so a padded path's last token need
     not be what the swap produces, and the router balance tracking above would be judging the wrong token.
-  - A Universal Router command byte with bit `0x40` set (the router ignores it) is refused.
+  - A Universal Router command byte with bit `0x40` set is refused. It is unused in Universal Router 1.x and 2.0
+    (command type mask `0x3f`) and selects new commands in 2.1 (mask `0x7f`), which the guard doesn't model.
   - An ERC-7579 `execute` with a non-zero mode payload is refused; an ERC-7579 batch must be canonical ABI.
+- Calldata over 128 KiB is refused with the new deny code `CALLDATA_TOO_LARGE`, before anything is decoded.
+  ABI offsets and lengths are checked for the canonical layout before any value is expanded. Before, offsets
+  that all pointed at one large value made the decoder expand it again for each one, so a crafted batch of
+  about 250 KB could exhaust the proxy's memory. It failed closed, but the proxy went down.
+
+### Known limitations
+
+- The guard reads the Universal Router 1.x and 2.0 command layout only. Swaps built for Universal Router 2.1 or
+  later (a sixth `minHopPriceX36` swap argument, commands in the `0x40` range) are refused with
+  `NON_CANONICAL_ABI`. As of October 2026 the Uniswap Trading API builds 2.1.2 calldata by default, so most
+  current Uniswap swaps are refused. V4 swaps (command `0x10`) are refused on every version. See the README's
+  limits section.
 
 ### Added
 
@@ -70,7 +83,8 @@ on it, so allowlisting a contract such as a DEX router allowed all of its functi
 - `"type": "eoa"` per destination (`"contract"` is also accepted and is the default).
 - `selectorWarnings(policy)` in the library, for callers that load policies themselves.
 - A `hint` for `SELECTORS_REQUIRED` in `error.data`.
-- Hints for `ROUTER_PAYOUT_TO_WRAPPER`, `ROUTER_OUTPUT_STRANDED` and `NON_CANONICAL_ABI` in `error.data`.
+- Hints for `ROUTER_PAYOUT_TO_WRAPPER`, `ROUTER_OUTPUT_STRANDED`, `NON_CANONICAL_ABI` and `CALLDATA_TOO_LARGE` in
+  `error.data`.
 
 ### Changed
 

@@ -408,12 +408,14 @@ function universalRouter(
 
   for (let i = 0; i < n; i++) {
     const raw = Number(hexToBigInt(sliceHex(commands, i, i + 1)));
-    // The router keeps the allow-revert flag (0x80) and the command type (0x3f), and ignores bit 0x40.
+    // 0x80 is the allow-revert flag. Universal Router 1.x and 2.0 take the command type from the low
+    // six bits (mask 0x3f), so bit 0x40 is unused there; 2.1 widens the mask to 0x7f and uses 0x40 for
+    // new commands. The guard models the 1.x/2.0 commands only, so any byte with 0x40 is refused.
     const cmd = raw & 0x3f;
     const input = inputs[i]!;
     const p = `${path}[${i}:0x${cmd.toString(16).padStart(2, "0")}]`;
     if (raw & 0x40) {
-      throw new DecodeDenied("NON_CANONICAL_ABI", `Universal Router command byte 0x${raw.toString(16).padStart(2, "0")} sets bit 0x40, which the router ignores`, p);
+      throw new DecodeDenied("NON_CANONICAL_ABI", `Universal Router command byte 0x${raw.toString(16).padStart(2, "0")} sets bit 0x40, which the guard does not support (unused before Universal Router 2.1, other commands from 2.1)`, p);
     }
     // Only a command that can't silently fail may count as moving funds out of the router.
     const settles = !revertible && (raw & 0x80) === 0;

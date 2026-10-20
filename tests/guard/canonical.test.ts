@@ -7,8 +7,8 @@
  * Each decoder has a control that passes and malformed variants of the same bytes that must not.
  */
 import { describe, expect, it, vi } from "vitest";
-import { encodeAbiParameters, encodeFunctionData, encodePacked, parseAbi, parseAbiParameters, type Address, type Hex } from "viem";
-import { decodeExact, decodeKnown, NonCanonicalAbi, sameBytes } from "../../src/guard/abi.js";
+import { encodeAbiParameters, encodeFunctionData, encodePacked, numberToHex, padHex, parseAbi, parseAbiParameters, type Address, type Hex } from "viem";
+import { MAX_CALLDATA_BYTES, checkAbiLayout, decodeExact, decodeKnown, NonCanonicalAbi, sameBytes } from "../../src/guard/abi.js";
 import { v3PathEnds } from "../../src/guard/calls.js";
 import { evaluateTx } from "../../src/guard/policy/evaluate.js";
 import { Guard } from "../../src/guard/guard.js";
@@ -16,7 +16,7 @@ import { MemoryStore } from "../../src/guard/store/memory.js";
 import { handleRequest } from "../../src/proxy/handler.js";
 import type { GuardConfig } from "../../src/types/index.js";
 import { parseSignedTx } from "../../src/guard/tx.js";
-import { AGENT, CHAIN, MULTICALL3, PERMIT2, RECIPIENT, ROUTER, SAFE, SPENDER_OK, TOKEN, basePolicy, sign } from "./helpers.js";
+import { AGENT, ALLOWED, CHAIN, MULTICALL3, PERMIT2, RECIPIENT, ROUTER, SAFE, SPENDER_OK, TOKEN, basePolicy, sign } from "./helpers.js";
 
 const MSG_SENDER = "0x0000000000000000000000000000000000000001" as Address;
 const WETH = "0x4200000000000000000000000000000000000006" as Address;
@@ -187,7 +187,7 @@ describe("Universal Router command inputs round-trip exactly", () => {
     await nonCanonical({ to: ROUTER, data: plan([["0x21", trailing(subPlan)]]) });
     await nonCanonical({ to: ROUTER, data: plan([["0x21", gapOffset(subPlan, 1, 2)]]) });
   });
-  it("a command byte with bit 0x40 (masked off by the router) is denied", async () => {
+  it("a command byte with bit 0x40 (unused before Universal Router 2.1) is denied", async () => {
     const swapIn = v3In(ADDRESS_THIS, path(TOKEN, 500, WETH));
     const v = await nonCanonical({ to: ROUTER, data: plan([["0x00", swapIn], ["0x44", sweep(WETH, MSG_SENDER)]]) });
     expect(v.reason).toContain("0x44");
@@ -263,6 +263,100 @@ describe("token and Permit2 calls round-trip exactly", () => {
   });
 });
 
+describe("decoders: lengths, bounds and nesting", () => {
+  it("a MultiSend entry whose data length runs past the payload is refused", async () => {
+    const entry = packEntry(TOKEN, approve);
+    // Claim 10 more bytes of data than the entry carries.
+    const lenAt = 2 + 53 * 2;
+    const claimed = BigInt((approve.length - 2) / 2 + 10);
+    const long = (entry.slice(0, lenAt) + claimed.toString(16).padStart(64, "0") + entry.slice(lenAt + 64)) as Hex;
+    await nonCanonical({ to: SAFE, data: execTx(MULTISEND, multiSend(long), 1) }, "MALFORMED_BATCH");
+    const huge = (entry.slice(0, lenAt) + "ff".repeat(32) + entry.slice(lenAt + 64)) as Hex;
+    await nonCanonical({ to: SAFE, data: execTx(MULTISEND, multiSend(huge), 1) }, "MALFORMED_BATCH");
+  });
+  it("an ERC-7579 single execution shorter than target + value (52 bytes) is refused", async () => {
+    const short = encodePacked(["address", "uint256"], [TOKEN, 0n]).slice(0, -2) as Hex; // 51 bytes
+    const v = await nonCanonical({ to: SAFE, data: exec7579(mode7579("00"), short) }, "MALFORMED_BATCH");
+    expect(v.reason).toContain("too short");
+    await allowed({ to: SAFE, data: exec7579(mode7579("00"), encodePacked(["address", "uint256"], [ALLOWED, 0n])) });
+  });
+  it("bit 0x40 is refused inside a sub-plan too", async () => {
+    const swapIn = v3In(ADDRESS_THIS, path(TOKEN, 500, WETH));
+    const inner = enc("bytes, bytes[]", ["0x44", [sweep(WETH, MSG_SENDER)]]);
+    await nonCanonical({ to: ROUTER, data: plan([["0x00", swapIn], ["0x21", inner]]) });
+    const fine = enc("bytes, bytes[]", ["0x04", [sweep(WETH, MSG_SENDER)]]);
+    await allowed({ to: ROUTER, data: plan([["0x00", swapIn], ["0x21", fine]]) });
+  });
+  it("a V2 path with fewer than two tokens is refused", async () => {
+    const v2 = (route: Address[]) => enc("address, uint256, uint256, address[], bool", [MSG_SENDER, 1n, 0n, route, true]);
+    await allowed({ to: ROUTER, data: plan([["0x08", v2([TOKEN, WETH])]]) });
+    const v = await nonCanonical({ to: ROUTER, data: plan([["0x08", v2([TOKEN])]]) });
+    expect(v.reason).toContain("fewer than two tokens");
+    await nonCanonical({ to: ROUTER, data: plan([["0x08", v2([])]]) });
+  });
+  it("a value out of range for its type (uint160 with high bits) is refused explicitly, not by accident", async () => {
+    const pull = enc("address, address, uint160", [TOKEN, MSG_SENDER, 1n]);
+    const dirty = dirtyWord(pull, 2, 2); // high byte of the uint160 word
+    expect(() => decodeExact("address, address, uint160", dirty)).toThrow(/out of range/);
+    await nonCanonical({ to: ROUTER, data: plan([["0x02", dirty]]) });
+  });
+  it("a Universal Router 2.1 swap (sixth argument minHopPriceX36) is refused: the guard reads the 2.0 layout", async () => {
+    const six = enc("address, uint256, uint256, bytes, bool, uint256[]", [MSG_SENDER, 1n, 0n, path(TOKEN, 500, WETH), true, []]);
+    await nonCanonical({ to: ROUTER, data: plan([["0x00", six]]) });
+    const sixV2 = enc("address, uint256, uint256, address[], bool, uint256[]", [MSG_SENDER, 1n, 0n, [TOKEN, WETH], true, [1n]]);
+    await nonCanonical({ to: ROUTER, data: plan([["0x08", sixV2]]) });
+  });
+});
+
+describe("decode amplification: offsets are checked before anything is expanded", () => {
+  const W = (n: number) => padHex(numberToHex(BigInt(n)), { size: 32 }).slice(2);
+  /** aggregate3 whose N tuple offsets all point at one tuple carrying S bytes of callData. */
+  const aliased = (n: number, s: number) => {
+    const one = aggregate3([{ target: ALLOWED, callData: ("0x" + "11".repeat(s)) as Hex }]);
+    const tuple = one.slice(10 + 3 * 64);
+    return (one.slice(0, 10) + W(32) + W(n) + W(n * 32).repeat(n) + tuple) as Hex;
+  };
+  it("aliased offsets under the size cap are refused quickly, without expanding the shared value", { timeout: 60_000 }, async () => {
+    const data = aliased(500, 30_000);
+    expect((data.length - 2) / 2).toBeLessThan(MAX_CALLDATA_BYTES);
+    const t0 = Date.now();
+    const v = await nonCanonical({ to: MULTICALL3, data });
+    expect(Date.now() - t0).toBeLessThan(5000); // milliseconds in practice; generous for loaded CI
+    expect(v.reason).toContain("layout");
+  });
+  it("calldata over 128 KiB is refused before decoding (CALLDATA_TOO_LARGE); at the limit it is decoded", { timeout: 60_000 }, async () => {
+    const big = aliased(4000, 120_000); // ~250 KB: crashed the proxy before
+    const v = await nonCanonical({ to: MULTICALL3, data: big }, "CALLDATA_TOO_LARGE");
+    expect(v.reason).toContain(`${MAX_CALLDATA_BYTES}`);
+    const at = ("0x12345678" + "00".repeat(MAX_CALLDATA_BYTES - 4)) as Hex;
+    expect((await judge({ to: ALLOWED, data: at })).code).toBe("SELECTOR_NOT_ALLOWED");
+    const over = (at + "00") as Hex;
+    expect((await judge({ to: ALLOWED, data: over })).code).toBe("CALLDATA_TOO_LARGE");
+  });
+  it("checkAbiLayout accepts canonical encodings of nested types", () => {
+    const types = "(address target, bool f, bytes data)[], bytes[], uint256[2], (uint256, bytes)[2], string";
+    const values = [[{ target: TOKEN, f: true, data: "0xabcd" }, { target: ALLOWED, f: false, data: "0x" }], ["0x01", "0x"], [1n, 2n], [[1n, "0x02"], [3n, "0x"]], "hi"];
+    const ok = enc(types, values);
+    expect(() => checkAbiLayout(parseAbiParameters(types), ok)).not.toThrow();
+    expect(() => checkAbiLayout(parseAbiParameters("uint256[]"), enc("uint256[]", [[]]))).not.toThrow();
+  });
+  it("checkAbiLayout refuses aliased, gapped and out-of-range offsets, overlong lengths and leftovers", () => {
+    const t = parseAbiParameters("bytes, bytes");
+    const ok = enc("bytes, bytes", ["0xaa", "0xbb"]);
+    const word = (h: Hex, w: number, v: string) => (h.slice(0, 2 + w * 64) + v + h.slice(2 + w * 64 + 64)) as Hex;
+    expect(() => checkAbiLayout(t, ok)).not.toThrow();
+    expect(() => checkAbiLayout(t, word(ok, 1, W(0x40)))).toThrow(/previous value ended/); // second aliases first
+    expect(() => decodeExact("bytes, bytes", word(ok, 1, W(0x40)))).toThrow(/layout/); // checked before decoding
+    expect(() => checkAbiLayout(t, gapOffset(ok, 1, 2))).toThrow(/previous value ended/);
+    expect(() => checkAbiLayout(t, word(ok, 1, "01" + W(0x80).slice(2)))).toThrow(/out of range/);
+    expect(() => checkAbiLayout(t, word(ok, 4, W(33)))).toThrow(/past the end/); // last length 33 > its 32-byte slot
+    expect(() => checkAbiLayout(t, trailing(ok))).toThrow(/left over/);
+    expect(() => checkAbiLayout(parseAbiParameters("uint256[]"), word(enc("uint256[]", [[1n]]), 1, W(1000)))).toThrow(/past the end/);
+    expect(() => checkAbiLayout(t, ok.slice(0, 2 + 64) as Hex)).toThrow(/past the end/);
+    expect(() => checkAbiLayout(parseAbiParameters("uint256, uint256"), `0x${W(1)}`)).toThrow(/head runs past/);
+  });
+});
+
 describe("through the proxy", () => {
   it("a calldata suffix is a -32083 NON_CANONICAL_ABI with a hint, and nothing is forwarded", async () => {
     const forward = vi.fn(async () => ({ jsonrpc: "2.0" as const, id: 1, result: "0xok" }));
@@ -281,5 +375,20 @@ describe("through the proxy", () => {
     });
     expect(forward).not.toHaveBeenCalled();
     expect(simulate).not.toHaveBeenCalled();
+  });
+  it("oversized calldata is a -32083 CALLDATA_TOO_LARGE with a hint", async () => {
+    const forward = vi.fn(async () => ({ jsonrpc: "2.0" as const, id: 1, result: "0xok" }));
+    const config = {
+      listenHost: "127.0.0.1", listenPort: 0, guardMode: "strict", failOpen: false, defaultChain: "base",
+      guard: new Guard({ policy: basePolicy(), store: new MemoryStore() }),
+      chains: { base: { id: "base", name: "Base", chainId: CHAIN, upstreamRpcUrl: "http://up", preferSimulateV1: true, ecosystem: "op" } },
+    } as unknown as GuardConfig;
+    const raw = await sign({ to: TOKEN, data: ("0x12345678" + "00".repeat(MAX_CALLDATA_BYTES)) as Hex, nonce: 0 });
+    const r = await handleRequest(config, { jsonrpc: "2.0", id: 1, method: "eth_sendRawTransaction", params: [raw] } as never, undefined, { simulate: vi.fn(), forward } as never);
+    expect(r.error?.data).toMatchObject({
+      policyCode: "CALLDATA_TOO_LARGE",
+      hint: "The transaction's calldata is larger than the guard will decode (128 KiB). Split the batch into smaller transactions.",
+    });
+    expect(forward).not.toHaveBeenCalled();
   });
 });

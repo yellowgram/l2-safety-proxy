@@ -16,7 +16,7 @@ What it checks, in one pass:
   "Unlimited" means any amount ≥ 2^128, not just `2^256-1`.
 - **What's hidden inside batches.** Multicall3, `multicall`, Safe `execTransaction` and `multiSend`,
   smart-account `execute`/`executeBatch`, ERC-7821 / EIP-7702 batch `execute`, and Uniswap Universal Router
-  are unpacked and every inner call is judged by the same rules. Delegatecall is refused, except a Safe's
+  (the 1.x/2.0 command layout; see [limits](#threat-model-and-limits) for 2.1) are unpacked and every inner call is judged by the same rules. Delegatecall is refused, except a Safe's
   call to MultiSend, whose entries are each checked.
 - **EIP-7702 delegation.** A type-4 transaction's `authorizationList` is checked: delegating the account is
   refused unless the delegate is on your list, and an authorization valid on every chain (`chainId 0`) is
@@ -283,6 +283,21 @@ close the gap:
   the router reads them; a padded or malformed one is refused (`NON_CANONICAL_ABI`). Within those rules the guard doesn't track amounts:
   prices and slippage are not checked, and the amount a swap spends is bounded only by the token approvals the
   router (or Permit2) holds. Keep those approvals capped.
+- **Universal Router versions: most current swaps are refused.** The guard reads the command layout of
+  Universal Router 1.x and 2.0. Universal Router 2.1 (2.1.1, 2.1.2) adds a sixth argument to the V2 and V3 swap
+  commands (`minHopPriceX36`) and new commands in the `0x40` range, and 2.2 builds on 2.1. The guard can't read
+  those, so it refuses them (`NON_CANONICAL_ABI`): **every swap built for Universal Router 2.1 or later is
+  refused.** As of October 2026 that is most swaps. The Uniswap Trading API builds calldata for 2.1.2 by default on
+  every chain that has it, which includes all the built-in chains with an official router (Ethereum, Arbitrum,
+  OP Mainnet, Base, Sepolia, Base Sepolia). It stops serving 2.0 on October 21, 2026. Arbitrum Sepolia and
+  OP Sepolia have no official Universal Router. Swaps pass only when they are built for a 2.0 (or 1.x)
+  router and sent to it. One way is `@uniswap/universal-router-sdk` with its default
+  `UniversalRouterVersion.V2_0`; the 2.0 routers are still deployed. Even then, a route through v4 pools
+  (command `0x10`) is refused on every version. Nothing is let through that the guard can't read; the cost is
+  that such swaps don't go out.
+- **Calldata size.** A transaction with more than 128 KiB of calldata is refused (`CALLDATA_TOO_LARGE`) before
+  anything is decoded. ABI offsets and lengths are checked for the canonical layout before values are
+  expanded, so crafted offsets can't make the proxy decode the same bytes over and over.
 - **Your own accounts.** Calls the agent's Safe or smart account makes are judged one by one, and the account's
   own admin functions (`enableModule`, `addOwnerWithThreshold`, `swapOwner`, `changeThreshold`, `setGuard`,
   `setFallbackHandler`, `installModule`, …) are always refused, so the agent can't take over the account.
@@ -402,9 +417,10 @@ on it, so allowlisting a DEX router allowed its admin and sweep functions too. I
   out) are refused (`ROUTER_OUTPUT_STRANDED`): anyone can take a balance left in the router. End such a plan
   with `SWEEP` or `UNWRAP_WETH` to `MSG_SENDER`, as Uniswap's own SDK does.
 - Calldata the guard decodes must be the exact standard encoding, with nothing after the arguments
-  (`NON_CANONICAL_ABI`). Standard encoders (viem, ethers, the Uniswap and Safe SDKs) already produce it; drop
-  any suffix you append to calldata, such as an attribution tag. Universal Router V3 paths must be whole pools
-  (20 + 23·k bytes).
+  (`NON_CANONICAL_ABI`). Standard ABI encoders such as viem and ethers produce it; drop any suffix you append to
+  calldata, such as an attribution tag. Universal Router V3 paths must be whole pools (20 + 23·k bytes).
+  Universal Router 2.1 swaps are refused (see [limits](#threat-model-and-limits)).
+- Calldata over 128 KiB is refused (`CALLDATA_TOO_LARGE`).
 - A key written twice in one object of a policy file (for example the same destination twice) is refused.
   Before, the last one silently won.
 - `accounts` and `universalRouter.recipients` can't list `0x…01` or `0x…02`, the router's `MSG_SENDER` and

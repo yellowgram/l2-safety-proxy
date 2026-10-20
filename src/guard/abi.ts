@@ -3,6 +3,7 @@ import {
   decodeFunctionData,
   encodeAbiParameters,
   encodeFunctionData,
+  hexToBytes,
   parseAbi,
   parseAbiParameters,
   toFunctionSelector,
@@ -137,6 +138,94 @@ export function signaturesFor(selector: string): string[] {
 }
 
 export class NonCanonicalAbi extends Error {}
+/** The offsets and lengths don't have the canonical shape (see checkAbiLayout). */
+export class NonCanonicalLayout extends NonCanonicalAbi {}
+
+/** Largest calldata the guard will decode (the EIP-3860 initcode limit is 48 KiB). */
+export const MAX_CALLDATA_BYTES = 128 * 1024;
+
+type Param = { type: string; components?: readonly Param[] };
+const ARRAY_TYPE = /^(.*)\[(\d*)\]$/;
+const elementOf = (p: Param): Param => ({ ...p, type: ARRAY_TYPE.exec(p.type)![1]! });
+
+function isDynamic(p: Param): boolean {
+  if (p.type === "bytes" || p.type === "string") return true;
+  const m = ARRAY_TYPE.exec(p.type);
+  if (m) return m[2] === "" || isDynamic(elementOf(p));
+  if (p.type === "tuple") return (p.components ?? []).some(isDynamic);
+  return false;
+}
+/** Bytes a parameter takes in its enclosing head: 32 for a dynamic one (its offset), else its full size. */
+function headSize(p: Param): number {
+  if (isDynamic(p)) return 32;
+  const m = ARRAY_TYPE.exec(p.type);
+  if (m) return Number(m[2]) * headSize(elementOf(p));
+  if (p.type === "tuple") return (p.components ?? []).reduce((a, c) => a + headSize(c), 0);
+  return 32;
+}
+
+/**
+ * Walk the ABI layout of `data` for `params` without decoding any value, and require the canonical
+ * shape: every offset points exactly where the previous dynamic value ended, every length fits in
+ * the data, and the encoding uses up the data exactly. Runs in time linear in the data size.
+ *
+ * This runs before the full decode, which otherwise materialises every element an offset points
+ * at: offsets that alias one large value let a few hundred kilobytes of calldata expand to
+ * gigabytes. The round trip after the decode still checks the values themselves.
+ */
+export function checkAbiLayout(params: readonly Param[], data: Hex | Uint8Array): void {
+  const b = typeof data === "string" ? hexToBytes(data) : data;
+  const fail = (why: string): never => {
+    throw new NonCanonicalLayout(`non-canonical ABI layout: ${why}`);
+  };
+  // An offset or length: a 32-byte word below 2^32.
+  const word = (at: number): number => {
+    if (at + 32 > b.length) fail("reads past the end of the data");
+    for (let i = at; i < at + 28; i++) if (b[i] !== 0) fail("offset or length out of range");
+    return ((b[at + 28]! << 24) >>> 0) + (b[at + 29]! << 16) + (b[at + 30]! << 8) + b[at + 31]!;
+  };
+  // `count` parameters laid out as one ABI tuple starting at `base`; returns the bytes it spans.
+  const tuple = (count: number, param: (i: number) => Param, base: number): number => {
+    let heads = 0;
+    for (let i = 0; i < count; i++) heads += headSize(param(i));
+    let tail = base + heads;
+    if (tail > b.length) fail("head runs past the end of the data");
+    let head = base;
+    for (let i = 0; i < count; i++) {
+      const p = param(i);
+      if (isDynamic(p)) {
+        if (base + word(head) !== tail) fail("offset is not where the previous value ended");
+        tail += value(p, tail);
+        head += 32;
+      } else {
+        head += headSize(p);
+      }
+    }
+    return tail - base;
+  };
+  // A dynamic value at `at`; returns the bytes it spans.
+  const value = (p: Param, at: number): number => {
+    if (p.type === "bytes" || p.type === "string") {
+      const n = word(at);
+      const padded = Math.ceil(n / 32) * 32;
+      if (at + 32 + padded > b.length) fail("length runs past the end of the data");
+      return 32 + padded;
+    }
+    const m = ARRAY_TYPE.exec(p.type);
+    if (m) {
+      const el = elementOf(p);
+      if (m[2] !== "") return tuple(Number(m[2]), () => el, at);
+      const n = word(at);
+      const size = headSize(el);
+      if (size === 0 && n > 0) fail("array of empty elements");
+      if (at + 32 + n * size > b.length) fail("array length runs past the end of the data");
+      return 32 + tuple(n, () => el, at + 32);
+    }
+    const c = p.components ?? [];
+    return tuple(c.length, (i) => c[i]!, at);
+  };
+  if (tuple(params.length, (i) => params[i]!, 0) !== b.length) fail("bytes left over after the encoding");
+}
 
 /**
  * Decode ABI parameters the way the target contract does, then re-encode them and require the
@@ -146,13 +235,21 @@ export class NonCanonicalAbi extends Error {}
  */
 export function decodeExact(types: string, data: Hex): readonly unknown[] {
   const params = parseAbiParameters(types);
+  checkAbiLayout(params as readonly Param[], data);
   let args: readonly unknown[];
   try {
     args = decodeAbiParameters(params, data);
   } catch {
     throw new NonCanonicalAbi(`input does not decode as (${types})`);
   }
-  if (!sameBytes(encodeAbiParameters(params, args as never), data)) throw new NonCanonicalAbi(`non-canonical ABI encoding for (${types})`);
+  // A value the encoder rejects (a uint160 with high bits, say) is one the contract reads differently.
+  let again: Hex;
+  try {
+    again = encodeAbiParameters(params, args as never);
+  } catch {
+    throw new NonCanonicalAbi(`input holds a value out of range for (${types})`);
+  }
+  if (!sameBytes(again, data)) throw new NonCanonicalAbi(`non-canonical ABI encoding for (${types})`);
   return args;
 }
 
@@ -173,20 +270,24 @@ export function decodeKnown(data: Hex, only?: "wrapper" | "token" | "permit2"): 
   if (!sel) return undefined;
   const entries = bySelector.get(sel);
   if (!entries) return undefined;
+  let layout: NonCanonicalLayout | undefined;
   for (const { abi, signature } of entries) {
     if (only && !belongs(signature, only)) continue;
     try {
+      checkAbiLayout((abi[0] as { inputs: readonly Param[] }).inputs, hexToBytes(data).subarray(4));
       const { functionName, args } = decodeFunctionData({ abi, data });
       const again = encodeFunctionData({ abi, functionName, args } as never);
       if (!sameBytes(again, data)) throw new NonCanonicalAbi(`non-canonical ABI encoding for ${signature}`);
       return { name: functionName, args: (args ?? []) as readonly unknown[], signature };
     } catch (err) {
-      if (err instanceof NonCanonicalAbi) throw err;
+      // A bad layout means "doesn't decode as this signature": try the next one with this selector.
+      if (err instanceof NonCanonicalLayout) layout = err;
+      else if (err instanceof NonCanonicalAbi) throw err;
       continue;
     }
   }
   if (only && !entries.some((e) => belongs(e.signature, only))) return undefined;
-  throw new NonCanonicalAbi(`calldata for ${entries.map((e) => e.signature).join(" | ")} does not decode`);
+  throw new NonCanonicalAbi(`calldata for ${entries.map((e) => e.signature).join(" | ")} does not decode${layout ? ` (${layout.message})` : ""}`);
 }
 
 const groups = {
