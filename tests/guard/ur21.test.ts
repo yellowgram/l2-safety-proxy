@@ -675,8 +675,10 @@ describe("the Universal Router calldata tag", () => {
   it("the stripped prefix is still judged on its own: a bad payout behind a valid tag is refused, with the note", async () => {
     const v = await judge(policy(), { to: UR21, data: withTag(plan([V3_IN6(ATTACKER)]), tag22()) });
     expect(v).toMatchObject({ allow: false, code: "ROUTER_RECIPIENT_NOT_ALLOWED", path: "tx>execute[0:0x00]", notes: [tagNote(`0x${tag22()}`)] });
+    // A refusal raised while decoding the plan carries the note too.
     expect(await judge(policy(), { to: UR21, data: withTag(plan([v4([A.IN_SINGLE(TOKEN, WETH, 100n, HOOK), A.SETTLE_ALL(TOKEN), A.TAKE_ALL(WETH)])]), TAG10) })).toMatchObject({
       code: "ROUTER_V4_HOOK_NOT_ALLOWED",
+      notes: [tagNote(`0x${TAG10}`)],
     });
   });
 
@@ -811,6 +813,7 @@ describe("the Universal Router calldata tag", () => {
   });
 
   it('"refuse" turns it off; the policy key takes only "strip" or "refuse" and defaults to "strip"', async () => {
+    for (const key of ["strip", "refuse"]) expect(() => policy({ universalRouter: { calldataTag: key } }), key).not.toThrow();
     const refuse = policy({ universalRouter: { calldataTag: "refuse" } });
     expect(refuse.universalRouter.calldataTag).toBe("refuse");
     expect(policy().universalRouter.calldataTag).toBe("strip");
