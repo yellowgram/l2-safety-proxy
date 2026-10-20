@@ -285,6 +285,49 @@ describe("funds left in the router itself are denied (ROUTER_OUTPUT_STRANDED)", 
   });
 });
 
+describe("a V3 path the router reads differently can't mis-key the swap output", () => {
+  // The router reads a path under 66 bytes as one pool (bytes 0..43) and ignores the rest, so the
+  // last 20 bytes of a padded path name a token the swap never produces.
+  const USDC = "0x8888888888888888888888888888888888888888" as Address;
+  const swap = (cmdByte: string, route: Hex) => [cmdByte, enc("address, uint256, uint256, bytes, bool", [ADDRESS_THIS, 10n ** 18n, 0n, route, true])] as const;
+  const junkPath = (tin: Address, tout: Address, decoy: Address) => (v3Path(tin, tout) + "0000" + decoy.slice(2)) as Hex; // 65 bytes
+  const denied = async (data: Hex, code = "NON_CANONICAL_ABI") => {
+    const v = await judge(basePolicy(), { to: ROUTER, data });
+    expect(v, show(v)).toMatchObject({ allow: false, code });
+    return v;
+  };
+  it("TOKEN|500|WETH|0000|USDC then SWEEP(USDC): denied (WETH would stay in the router)", async () => {
+    const v = await denied(plan([swap("0x00", junkPath(TOKEN, WETH, USDC)), SWEEP(USDC, MSG_SENDER)]));
+    expect(v.path).toBe("tx>execute[0:0x00]");
+    expect(v.reason).toContain("V3 path of 65 bytes");
+  });
+  it("TOKEN|500|USDC|0000|WETH then UNWRAP_WETH: denied (USDC would stay in the router)", async () => {
+    await denied(plan([swap("0x00", junkPath(TOKEN, USDC, WETH)), UNWRAP(MSG_SENDER)]));
+  });
+  it("the padded path with nothing after it is denied", async () => {
+    await denied(plan([swap("0x00", junkPath(TOKEN, WETH, USDC))]));
+  });
+  it("a multi-hop path with one extra byte is denied", async () => {
+    const p = (encodePacked(["address", "uint24", "address", "uint24", "address"], [TOKEN, 500, USDC, 500, WETH]) + "00") as Hex;
+    await denied(plan([swap("0x00", p), UNWRAP(MSG_SENDER)]));
+  });
+  it("exact-output paths get the same check", async () => {
+    await denied(plan([swap("0x01", junkPath(WETH, TOKEN, USDC)), SWEEP(WETH, MSG_SENDER)]));
+  });
+  it("the same plans with a well-formed path still settle", async () => {
+    expect((await judge(basePolicy(), { to: ROUTER, data: plan([swap("0x00", v3Path(TOKEN, WETH)), SWEEP(WETH, MSG_SENDER)]) })).allow).toBe(true);
+    const hops = encodePacked(["address", "uint24", "address", "uint24", "address"], [TOKEN, 500, USDC, 500, WETH]);
+    expect((await judge(basePolicy(), { to: ROUTER, data: plan([swap("0x00", hops), UNWRAP(MSG_SENDER)]) })).allow).toBe(true);
+    // The real output of TOKEN|500|WETH is WETH, so sweeping USDC leaves it stranded.
+    await denied(plan([swap("0x00", v3Path(TOKEN, WETH)), SWEEP(USDC, MSG_SENDER)]), "ROUTER_OUTPUT_STRANDED");
+  });
+  it("exact output to ADDRESS_THIS credits the output (the path's first token): sweeping only the input is denied", async () => {
+    // Exact-output paths are reversed: WETH|500|TOKEN buys WETH with TOKEN.
+    await denied(plan([swap("0x01", v3Path(WETH, TOKEN)), SWEEP(TOKEN, MSG_SENDER)]), "ROUTER_OUTPUT_STRANDED");
+    expect((await judge(basePolicy(), { to: ROUTER, data: plan([swap("0x01", v3Path(WETH, TOKEN)), SWEEP(WETH, MSG_SENDER)]) })).allow).toBe(true);
+  });
+});
+
 describe("multi-step plans that empty the router still pass", () => {
   const allowed = async (tx: Parameters<typeof sign>[0], policy = basePolicy()) => {
     const v = await judge(policy, tx);

@@ -174,7 +174,13 @@ describe("Permit2", () => {
 describe("Universal Router", () => {
   const ur = parseAbi(["function execute(bytes commands, bytes[] inputs, uint256 deadline)"]);
   const v3 = (recipient: Address) =>
-    encodeAbiParameters(parseAbiParameters("address, uint256, uint256, bytes, bool"), [recipient, 1n, 0n, "0x", true]);
+    encodeAbiParameters(parseAbiParameters("address, uint256, uint256, bytes, bool"), [
+      recipient,
+      1n,
+      0n,
+      encodePacked(["address", "uint24", "address"], [TOKEN, 500, "0x4200000000000000000000000000000000000006"]),
+      true,
+    ]);
   it("allows a swap paid to the sender (MSG_SENDER constant)", async () => {
     const data = encodeFunctionData({ abi: ur, args: ["0x00", [v3("0x0000000000000000000000000000000000000001")], 0n] });
     expect((await judge(basePolicy(), { to: ROUTER, data })).allow).toBe(true);

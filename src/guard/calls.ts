@@ -1,4 +1,4 @@
-import { decodeAbiParameters, encodeFunctionData, getAddress, hexToBigInt, parseAbiParameters, sliceHex, size, type Address, type Hex } from "viem";
+import { encodeFunctionData, getAddress, hexToBigInt, sliceHex, size, type Address, type Hex } from "viem";
 import {
   MAX_DEPTH,
   MULTICALL3,
@@ -6,6 +6,7 @@ import {
   PERMIT2_ABI,
   SAFE_MULTISEND,
   SAFE_MULTISEND_CALL_ONLY,
+  decodeExact,
   decodeKnown,
 } from "./abi.js";
 
@@ -101,13 +102,7 @@ function walk(
   const leaf = (): void => void out.leaves.push({ kind: "call", to: call.to, value: call.value, data: call.data, path, fromAccount });
   if (!call.to || call.data === "0x" || size(call.data) < 4) return leaf();
 
-  let d;
-  try {
-    d = decodeKnown(call.data, "wrapper");
-  } catch (err) {
-    if (err instanceof NonCanonicalAbi) throw new DecodeDenied("NON_CANONICAL_ABI", err.message, path);
-    throw err;
-  }
+  const d = decodeWrapper(call.data, path);
   if (!d) return leaf();
 
   const to = call.to;
@@ -167,7 +162,7 @@ function walk(
         if (!SAFE_MULTISEND_CALL_ONLY.has(target) && !SAFE_MULTISEND.has(target)) {
           throw new DecodeDenied("DELEGATECALL_DENIED", `Safe DELEGATECALL to ${innerTo} (only Safe MultiSend is allowed)`, path);
         }
-        const inner = decodeKnown(data, "wrapper");
+        const inner = decodeWrapper(data, `${path}>execTransaction`);
         if (!inner || inner.name !== "multiSend") {
           throw new DecodeDenied("DELEGATECALL_DENIED", "Safe DELEGATECALL to MultiSend without multiSend calldata", path);
         }
@@ -226,6 +221,10 @@ function walk(
       if (!/^0+$/.test(unusedAndSelector)) {
         throw new DecodeDenied("MALFORMED_BATCH", "ERC-7579 mode has a mode selector or reserved bytes the guard can't interpret", path);
       }
+      // The default mode ignores the payload, so a non-zero payload is bytes the account never reads.
+      if (!/^0+$/.test(mode.slice(22))) {
+        throw new DecodeDenied("NON_CANONICAL_ABI", "ERC-7579 mode payload must be zero for the default mode", path);
+      }
       if (callType === "00") {
         if (size(exec) < 52) throw new DecodeDenied("MALFORMED_BATCH", "ERC-7579 single execution too short", path);
         const target = getAddress(sliceHex(exec, 0, 20));
@@ -237,9 +236,9 @@ function walk(
       if (callType === "01") {
         let batch: readonly { target: Address; value: bigint; callData: Hex }[];
         try {
-          batch = (decodeAbiParameters(parseAbiParameters("(address target, uint256 value, bytes callData)[]"), exec) as unknown as [typeof batch])[0];
+          batch = (decodeExact("(address target, uint256 value, bytes callData)[]", exec) as unknown as [typeof batch])[0];
         } catch {
-          throw new DecodeDenied("NON_CANONICAL_ABI", "ERC-7579 batch execution does not decode", path);
+          throw new DecodeDenied("NON_CANONICAL_ABI", "ERC-7579 batch execution does not decode canonically", path);
         }
         batch.forEach((c, i) => sub(i, { to: c.target, value: c.value, data: c.callData }, true));
         return;
@@ -254,6 +253,16 @@ function walk(
     }
   }
   leaf();
+}
+
+/** decodeKnown for wrapper selectors, with a non-canonical encoding turned into a denial at `path`. */
+function decodeWrapper(data: Hex, path: string) {
+  try {
+    return decodeKnown(data, "wrapper");
+  } catch (err) {
+    if (err instanceof NonCanonicalAbi) throw new DecodeDenied("NON_CANONICAL_ABI", err.message, path);
+    throw err;
+  }
 }
 
 function unpackMultiSend(packed: Hex, path: string, ctx: FlattenContext, out: Flattened, depth: number, asAccount: boolean, caller: Address) {
@@ -297,12 +306,35 @@ const UR = {
   EXECUTE_SUB_PLAN: 0x21,
 } as const;
 
+/**
+ * Decode one Universal Router command input. The router reads inputs with its own calldata decoder,
+ * which agrees with the ABI only for the standard encoding, and ignores anything after it. So the
+ * input must round-trip exactly: decode, re-encode, byte-equal.
+ */
 function urDecode(types: string, input: Hex, path: string): readonly unknown[] {
   try {
-    return decodeAbiParameters(parseAbiParameters(types), input);
+    return decodeExact(types, input);
   } catch {
-    throw new DecodeDenied("NON_CANONICAL_ABI", `Universal Router input does not decode as (${types})`, path);
+    throw new DecodeDenied("NON_CANONICAL_ABI", `Universal Router input is not the canonical encoding of (${types})`, path);
   }
+}
+
+/** V3 path layout (V3Path.sol): token (20) then one or more fee (3) + token (20) hops. */
+const V3_ADDR = 20;
+const V3_HOP = 23;
+const V3_ONE_POOL = V3_ADDR + V3_HOP; // 43
+/**
+ * The tokens a V3 path really swaps between, decoded as the router does. The router treats a path
+ * shorter than two pools (66 bytes) as exactly one pool and ignores whatever follows the first 43
+ * bytes, and walks longer paths 23 bytes at a time. A path whose length isn't 20 + 23·k (k ≥ 1) is
+ * therefore read differently by the router than by its last 20 bytes, so it is refused outright.
+ */
+export function v3PathEnds(route: Hex, path: string): { first: string; last: string } {
+  const n = size(route);
+  if (n < V3_ONE_POOL || (n - V3_ADDR) % V3_HOP !== 0) {
+    throw new DecodeDenied("NON_CANONICAL_ABI", `Universal Router V3 path of ${n} bytes is not token + (fee + token) hops`, path);
+  }
+  return { first: lc(sliceHex(route, 0, V3_ADDR))!, last: lc(sliceHex(route, n - V3_ADDR, n))! };
 }
 
 /** Universal Router amount constant: "the router's whole balance of this token" (Constants.CONTRACT_BALANCE). */
@@ -373,16 +405,16 @@ function universalRouter(
     if (amount === UR_CONTRACT_BALANCE || (h.amount !== undefined && amount >= h.amount)) funds.delete(k);
     else if (h.amount !== undefined) h.amount -= amount;
   };
-  const v3Token = (route: Hex, first: boolean, p: string): string => {
-    if (size(route) < 43) throw new DecodeDenied("NON_CANONICAL_ABI", "Universal Router V3 path is shorter than one pool", p);
-    return lc(first ? sliceHex(route, 0, 20) : sliceHex(route, size(route) - 20))!;
-  };
 
   for (let i = 0; i < n; i++) {
     const raw = Number(hexToBigInt(sliceHex(commands, i, i + 1)));
-    const cmd = raw & 0x7f;
+    // The router keeps the allow-revert flag (0x80) and the command type (0x3f), and ignores bit 0x40.
+    const cmd = raw & 0x3f;
     const input = inputs[i]!;
     const p = `${path}[${i}:0x${cmd.toString(16).padStart(2, "0")}]`;
+    if (raw & 0x40) {
+      throw new DecodeDenied("NON_CANONICAL_ABI", `Universal Router command byte 0x${raw.toString(16).padStart(2, "0")} sets bit 0x40, which the router ignores`, p);
+    }
     // Only a command that can't silently fail may count as moving funds out of the router.
     const settles = !revertible && (raw & 0x80) === 0;
     switch (cmd) {
@@ -392,8 +424,9 @@ function universalRouter(
         payout(r, p);
         // Exact-in paths run input → output; exact-out paths are reversed.
         const exactIn = cmd === UR.V3_SWAP_EXACT_IN;
-        if (exactIn && !payerIsUser) spend(v3Token(route, true, p), amount, settles);
-        if (toRouter(r)) credit(v3Token(route, !exactIn, p), `the output of swap ${p}`, p);
+        const ends = v3PathEnds(route, p);
+        if (exactIn && !payerIsUser) spend(ends.first, amount, settles);
+        if (toRouter(r)) credit(exactIn ? ends.last : ends.first, `the output of swap ${p}`, p);
         break;
       }
       case UR.V2_SWAP_EXACT_IN:

@@ -109,7 +109,10 @@ A destination is fail-closed: unless you say otherwise, the agent may not call a
    they're an ordinary call to that destination. ERC-7579 modes other than plain call/batch with exec type
    `00` or `01` and a zero mode selector are refused (`MALFORMED_BATCH`). In a Universal Router plan, every
    payout's recipient is recorded, and funds the plan puts into the router itself must leave it by the end of
-   that plan (`ROUTER_OUTPUT_STRANDED`). WETH is recognised by the router's own WETH address on the chains the
+   that plan (`ROUTER_OUTPUT_STRANDED`). Every input the guard unpacks (each wrapper's arguments, each
+   Universal Router command input, ERC-7579 execution data, token and Permit2 calls) is decoded as the target
+   contract decodes it, re-encoded and compared byte for byte; anything else is `NON_CANONICAL_ABI`. A V3
+   path must be a token followed by whole pools (fee + token), 20 + 23·k bytes. WETH is recognised by the router's own WETH address on the chains the
    proxy ships templates for; on other chains, `SWEEP` the WETH instead of `UNWRAP_WETH`.
 3. Each inner call is judged:
    - a Universal Router payout must go to the sender, one of `accounts` or a `universalRouter.recipients` entry
@@ -162,7 +165,7 @@ such as `transferWithAuthorization`, is allowed. `check-policy` warns about this
 | `AUTHORIZATION_WRONG_CHAIN` | 7702 authorization for another chain |
 | `AUTHORIZATION_UNRECOVERABLE` | 7702 authorization signature doesn't recover |
 | `POISONED_ADDRESS` | The receive watch flagged this address as a look-alike |
-| `NON_CANONICAL_ABI` | Calldata that decodes two ways (padding tricks) |
+| `NON_CANONICAL_ABI` | Calldata the target would read differently from the guard or partly ignore: not the exact standard ABI encoding (trailing bytes, unusual offsets or lengths, dirty padding), a Universal Router input that doesn't round-trip, a V3 path that isn't 20 + 23·k bytes, a router command byte with bit `0x40`, or an ERC-7579 mode with a payload |
 | `DELEGATECALL_DENIED` | A delegatecall other than a Safe's call to MultiSend |
 | `TOO_DEEP` | Batches nested too deeply |
 | `MALFORMED_BATCH` | A batch that doesn't decode cleanly |

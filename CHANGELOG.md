@@ -45,6 +45,19 @@ on it, so allowlisting a contract such as a DEX router allowed all of its functi
   `loadPolicyFile`). Before, JSON parsing kept the last one, so a later entry could silently replace a stricter one.
 - A payout to one of `accounts` is allowed even when that account isn't part of the transaction (in 1.x only
   when it was a wrapper in it).
+- Every input the guard decodes must be the exact canonical encoding the target contract reads: the guard
+  decodes it as the contract does, re-encodes it and requires the same bytes. Anything else is refused with
+  `NON_CANONICAL_ABI`. This covers ERC-20 and Permit2 calls; Multicall3, router `multicall`, Safe
+  `execTransaction` and MultiSend; ERC-7579 `execute`; 7702 and smart-account batches; Universal Router
+  `execute` and each command's input. New in 2.0:
+  - Trailing bytes after a known function's arguments are refused (1.x ignored them, as Solidity does). Tools
+    that append a suffix to calldata, such as an attribution tag, must not do so for calls the guard checks.
+  - Universal Router command inputs must round-trip exactly (1.x decoded them leniently).
+  - A Universal Router V3 path must be 20 + 23·k bytes (k ≥ 1): a token, then fee + token per pool. The router
+    reads a path shorter than 66 bytes as one pool and ignores the rest, so a padded path's last token need
+    not be what the swap produces, and the router balance tracking above would be judging the wrong token.
+  - A Universal Router command byte with bit `0x40` set (the router ignores it) is refused.
+  - An ERC-7579 `execute` with a non-zero mode payload is refused; an ERC-7579 batch must be canonical ABI.
 
 ### Added
 
@@ -57,7 +70,7 @@ on it, so allowlisting a contract such as a DEX router allowed all of its functi
 - `"type": "eoa"` per destination (`"contract"` is also accepted and is the default).
 - `selectorWarnings(policy)` in the library, for callers that load policies themselves.
 - A `hint` for `SELECTORS_REQUIRED` in `error.data`.
-- Hints for `ROUTER_PAYOUT_TO_WRAPPER` and `ROUTER_OUTPUT_STRANDED` in `error.data`.
+- Hints for `ROUTER_PAYOUT_TO_WRAPPER`, `ROUTER_OUTPUT_STRANDED` and `NON_CANONICAL_ABI` in `error.data`.
 
 ### Changed
 

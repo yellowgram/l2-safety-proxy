@@ -279,7 +279,8 @@ close the gap:
   (a swap's output, wrapped or unwrapped ETH, tokens pulled in with Permit2, ETH sent with the call) must leave
   again in the same plan, through `SWEEP` or `UNWRAP_WETH` to an allowed payee or a later swap that spends the
   whole balance; otherwise the plan is refused (`ROUTER_OUTPUT_STRANDED`). Commands flagged "allow revert" don't
-  count as moving funds out. Unknown commands are refused. Within those rules the guard doesn't track amounts:
+  count as moving funds out. Unknown commands are refused. Command inputs and V3 paths are decoded exactly as
+  the router reads them; a padded or malformed one is refused (`NON_CANONICAL_ABI`). Within those rules the guard doesn't track amounts:
   prices and slippage are not checked, and the amount a swap spends is bounded only by the token approvals the
   router (or Permit2) holds. Keep those approvals capped.
 - **Your own accounts.** Calls the agent's Safe or smart account makes are judged one by one, and the account's
@@ -400,6 +401,10 @@ on it, so allowlisting a DEX router allowed its admin and sweep functions too. I
 - Funds a Universal Router plan leaves in the router itself (a swap to `ADDRESS_THIS` with nothing sweeping it
   out) are refused (`ROUTER_OUTPUT_STRANDED`): anyone can take a balance left in the router. End such a plan
   with `SWEEP` or `UNWRAP_WETH` to `MSG_SENDER`, as Uniswap's own SDK does.
+- Calldata the guard decodes must be the exact standard encoding, with nothing after the arguments
+  (`NON_CANONICAL_ABI`). Standard encoders (viem, ethers, the Uniswap and Safe SDKs) already produce it; drop
+  any suffix you append to calldata, such as an attribution tag. Universal Router V3 paths must be whole pools
+  (20 + 23·k bytes).
 - A key written twice in one object of a policy file (for example the same destination twice) is refused.
   Before, the last one silently won.
 - `accounts` and `universalRouter.recipients` can't list `0x…01` or `0x…02`, the router's `MSG_SENDER` and

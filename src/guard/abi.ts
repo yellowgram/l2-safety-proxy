@@ -1,7 +1,10 @@
 import {
+  decodeAbiParameters,
   decodeFunctionData,
+  encodeAbiParameters,
   encodeFunctionData,
   parseAbi,
+  parseAbiParameters,
   toFunctionSelector,
   type Abi,
   type Hex,
@@ -136,9 +139,32 @@ export function signaturesFor(selector: string): string[] {
 export class NonCanonicalAbi extends Error {}
 
 /**
+ * Decode ABI parameters the way the target contract does, then re-encode them and require the
+ * result to equal the input byte for byte. Anything a contract would read differently from the
+ * guard or silently ignore (trailing bytes, non-standard offsets or lengths, dirty high bits in an
+ * address or bool, padding that isn't zero) fails the round trip and throws NonCanonicalAbi.
+ */
+export function decodeExact(types: string, data: Hex): readonly unknown[] {
+  const params = parseAbiParameters(types);
+  let args: readonly unknown[];
+  try {
+    args = decodeAbiParameters(params, data);
+  } catch {
+    throw new NonCanonicalAbi(`input does not decode as (${types})`);
+  }
+  if (!sameBytes(encodeAbiParameters(params, args as never), data)) throw new NonCanonicalAbi(`non-canonical ABI encoding for (${types})`);
+  return args;
+}
+
+/** Byte equality of two hex strings, ignoring letter case. */
+export function sameBytes(a: Hex, b: Hex): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+/**
  * Decode calldata against the known ABIs for its selector.
- * Re-encodes the result and requires it to match the input byte-for-byte
- * (trailing bytes after the encoding are allowed: Solidity ignores them).
+ * Re-encodes the result and requires it to match the input byte for byte. Trailing bytes are
+ * refused too: the contract ignores them, so the guard would be judging bytes that never run.
  * Returns undefined for unknown selectors. Throws NonCanonicalAbi when the
  * selector is known but the bytes don't decode canonically.
  */
@@ -147,13 +173,12 @@ export function decodeKnown(data: Hex, only?: "wrapper" | "token" | "permit2"): 
   if (!sel) return undefined;
   const entries = bySelector.get(sel);
   if (!entries) return undefined;
-  const lower = data.toLowerCase();
   for (const { abi, signature } of entries) {
     if (only && !belongs(signature, only)) continue;
     try {
       const { functionName, args } = decodeFunctionData({ abi, data });
-      const again = encodeFunctionData({ abi, functionName, args } as never).toLowerCase();
-      if (!lower.startsWith(again)) throw new NonCanonicalAbi(`non-canonical ABI encoding for ${signature}`);
+      const again = encodeFunctionData({ abi, functionName, args } as never);
+      if (!sameBytes(again, data)) throw new NonCanonicalAbi(`non-canonical ABI encoding for ${signature}`);
       return { name: functionName, args: (args ?? []) as readonly unknown[], signature };
     } catch (err) {
       if (err instanceof NonCanonicalAbi) throw err;
