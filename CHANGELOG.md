@@ -1,5 +1,49 @@
 # Changelog
 
+## 2.1.0
+
+Swaps built for Universal Router 2.1 (2.1.1 and 2.1.2) are read and checked instead of refused, including v4
+swaps. All 2.0 rules hold unchanged, and calls to any other router are judged exactly as in 2.0.0.
+
+### Added
+
+- The official Universal Router 2.1.1 and 2.1.2 addresses on the built-in chains (Ethereum, OP Mainnet, Base,
+  Arbitrum, Sepolia, Base Sepolia; from Uniswap/universal-router `deploy-addresses/`) are read with the 2.1
+  input layout: command mask `0x7f`; the sixth V2/V3 swap argument `minHopPriceX36`, which must be empty or
+  have one entry per hop; `PAY_PORTION_FULL_PRECISION` (`0x07`), judged as a payout like `PAY_PORTION`.
+  Exported as `UR_V2_1` and `ur21Routers(chainId)`.
+- `V4_SWAP` (`0x10`) on a 2.1 router: every action's params are decoded with the 2.1 v4 structs and must
+  round-trip byte for byte. The swap actions, `SETTLE`, `SETTLE_ALL`, `TAKE`, `TAKE_ALL` and `TAKE_PORTION` are
+  accepted; any other action is refused (`ROUTER_COMMAND_UNCHECKED`). Takes are payouts under the same rules as
+  other router payouts (`TAKE_ALL` pays the router's caller, so inside Multicall3 it is
+  `ROUTER_PAYOUT_TO_WRAPPER`), and a take into the router must leave it in the same plan
+  (`ROUTER_OUTPUT_STRANDED`). A settle the router pays counts as spending the router's funds only for
+  `CONTRACT_BALANCE`, an explicit amount, or the open delta of a currency whose debt is known (used only as
+  the input of exact-input swaps with explicit amounts, and settled once).
+- New deny code `ROUTER_V4_HOOK_NOT_ALLOWED` and policy key `universalRouter.v4Hooks`: a v4 pool or path hop
+  with a non-zero hook is refused unless the hook is listed.
+- `executeSigned(bytes,bytes[],bytes32,bytes32,bool,bytes32,bytes,uint256)` (2.1) is unpacked like `execute`.
+
+### Changed
+
+- Calldata built for 2.0 and sent to a 2.1 router address, or built for 2.1 and sent to any other router, is
+  refused (`NON_CANONICAL_ABI`, or `ROUTER_COMMAND_UNCHECKED` for a command the other version doesn't have).
+  A 2.1 router reverts on 2.0 inputs, and 2.0 inputs are the only ones checked on other routers.
+- `executeSigned` is unpacked on every contract, so its commands are judged even on an `allowAnySelector`
+  destination. Its selector still has to be allowed.
+- The `NON_CANONICAL_ABI` reason for a command byte with bit `0x40` on a 2.0 router now says the router version
+  doesn't use it.
+
+### Still refused
+
+- Bytes after the ABI encoding of the arguments. 94 of 96 Universal Router 2.1.2 transactions sampled on
+  mainnets in October 2026 carry such a suffix (starting `0x756e6978`, "unix"), so they are refused as sent
+  and pass only once it is removed.
+- `ACROSS_V4_DEPOSIT_V3` (`0x40`) and every other command in `0x40`–`0x7f`; `V4_SWAP` on a 2.0 router; v4
+  liquidity and other non-swap actions; Universal Router 2.2 and routers or chains not in the built-in list
+  (read as 2.0); Uniswap `SwapProxy`.
+- Prices and slippage are still not checked.
+
 ## 2.0.0
 
 Contract destinations are fail closed. In 1.x a destination without a `selectors` list allowed every function
