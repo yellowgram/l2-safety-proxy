@@ -168,8 +168,17 @@ function judgeLeaf(policy: Policy, leaf: Extract<Leaf, { kind: "call" }>, ctx: L
   // The agent's own account changing who controls it (owners, threshold, modules, guards,
   // fallback handler) is never something a spend policy should allow.
   const sel0 = (selectorOf(leaf.data) ?? "0x").toLowerCase();
-  if ((to === ctx.sender || policy.accounts.has(to)) && ACCOUNT_ADMIN_SELECTORS.has(sel0)) {
+  const ownAccount = to === ctx.sender || policy.accounts.has(to);
+  if (ownAccount && ACCOUNT_ADMIN_SELECTORS.has(sel0)) {
     throw new Deny("ACCOUNT_ADMIN_DENIED", `${ACCOUNT_ADMIN_SELECTORS.get(sel0)} on the agent's account ${to} changes who controls it and is always denied`, path);
+  }
+  // Wrappers on the agent's own account (execute, executeBatch, 7579 execute, multicall) were
+  // unpacked into their inner calls before this point, so any other function reaching here runs
+  // the account's (or its 7702 delegate's) own code: upgradeToAndCall, addOwner*, validator
+  // installs and the like. The guard can't know them all, so none is allowed, even when the
+  // account is also listed as a destination.
+  if (ownAccount && leaf.data !== "0x") {
+    throw new Deny("ACCOUNT_ADMIN_DENIED", `function ${sel0} on the agent's own account ${to} is not a wrapper the guard can see into (execute, executeBatch, multicall); other account functions can change who controls it and are always denied`, path);
   }
 
   if (to === ctx.permit2) return judgePermit2(policy, leaf, ctx, spend);

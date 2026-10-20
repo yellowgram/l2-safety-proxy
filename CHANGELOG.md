@@ -20,7 +20,9 @@ l2-send-guard becomes one policy guard for agent wallets. It absorbs six single-
 - The guarded signer refuses `signMessage` unless you pass `allowMessage`, and always refuses `SafeTx`,
   `SafeMessage` and ERC-4337 user-operation typed data.
 - An address can't be in both `accounts` and `destinations`. Admin calls on the agent's own accounts
-  (modules, owners, threshold, guards, fallback handler) are refused (`ACCOUNT_ADMIN_DENIED`).
+  (modules, owners, threshold, guards, fallback handler) are refused (`ACCOUNT_ADMIN_DENIED`), and so is any
+  other call with data on the sender or an account that is not a wrapper the guard unpacks
+  (`upgradeToAndCall`, `addOwnerAddress`, …), even if the sender is listed as a destination.
 - Legacy transactions without a chain id are refused (`REPLAYABLE_TX`).
 - Requests with keys that differ only in case are refused (`-32600`), and only `jsonrpc`, `id`, `method` and
   `params` are forwarded.

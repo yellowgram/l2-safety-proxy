@@ -266,6 +266,10 @@ close the gap:
 - **Your own accounts.** Calls the agent's Safe or smart account makes are judged one by one, and the account's
   own admin functions (`enableModule`, `addOwnerWithThreshold`, `swapOwner`, `changeThreshold`, `setGuard`,
   `setFallbackHandler`, `installModule`, …) are always refused, so the agent can't take over the account.
+  So is every other call with data on the account or on the sender itself (`upgradeToAndCall`, Coinbase
+  `addOwnerAddress`, Kernel validators, …) unless it is a wrapper the guard unpacks (`execute`,
+  `executeBatch`, `multicall`), even when the sender's own 7702 address is listed as a destination.
+  The plain nonce cancel (a 0-value self-send with no data) still passes.
   An address can't be in both `accounts` and `destinations`.
 - **Off-chain signatures** (EIP-2612 Permit, Permit2, other EIP-712 messages) are only checked when signed
   through the guarded signer. The proxy never sees them.

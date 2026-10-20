@@ -52,7 +52,7 @@ Anything the policy doesn't allow is refused. An empty policy `{}` refuses every
 | `delegation.mode` | `deny` | `deny` refuses every EIP-7702 delegation; `allowlist` allows `delegates` |
 | `delegation.delegates` | none | Contracts the account may delegate to |
 | `delegation.allowAnyChain` | `false` | Allow authorizations signed for chain id 0 (valid on every chain) |
-| `accounts` | none | Smart accounts the agent owns (its Safe, its 4337 wallet). Calls they make are checked one by one, they don't need to be destinations, and their admin functions (modules, owners, threshold, guards, fallback handler) are always refused. An address can't be both an account and a destination |
+| `accounts` | none | Smart accounts the agent owns (its Safe, its 4337 wallet). Calls they make are checked one by one, they don't need to be destinations, and their admin functions (modules, owners, threshold, guards, fallback handler) are always refused. So is any other function called on the account itself (or on the sender) that is not a wrapper the guard unpacks (`execute`, `executeBatch`, 7579 `execute`, `multicall`), such as `upgradeToAndCall` or `addOwnerAddress`. An address can't be both an account and a destination |
 | `universalRouter.recipients` | none | Extra addresses a swap's output may go to (the sender and the router always may) |
 | `allowContractCreation` | `false` | Allow deploying contracts |
 | `typedData.allowUnknown` | `false` | Let the guarded signer sign EIP-712 messages it can't check |
@@ -125,7 +125,7 @@ such as `transferWithAuthorization`. `check-policy` warns about this.
 | `TYPED_DATA_UNKNOWN` | (guarded signer) EIP-712 message it can't check |
 | `TYPED_DATA_AUTHORIZES_TX` | (guarded signer) `SafeTx`, `SafeMessage` or a 4337 user operation: always refused |
 | `MESSAGE_SIGNING_DENIED` | (guarded signer) `signMessage` without a matching `allowMessage` |
-| `ACCOUNT_ADMIN_DENIED` | An admin call (module, owner, threshold, guard, fallback handler) on the sender or one of `accounts` |
+| `ACCOUNT_ADMIN_DENIED` | A call with data on the sender or one of `accounts` that is not a wrapper the guard unpacks: an admin call (module, owner, threshold, guard, fallback handler) or any other account function (`upgradeToAndCall`, `addOwnerAddress`, validator installs). Applies even if the sender is listed as a destination. |
 | `REPLAYABLE_TX` | A legacy transaction without a chain id |
 | `INTERNAL_ERROR` | The policy check itself failed unexpectedly; nothing was sent |
 | `IDEMPOTENCY_CONFLICT` | `-32087`: key already sent another transaction |
