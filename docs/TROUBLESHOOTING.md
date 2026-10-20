@@ -35,9 +35,11 @@ the codes. The usual causes:
   moves it out. End the plan with `SWEEP` (or `UNWRAP_WETH` for WETH) to `MSG_SENDER`.
 - `NON_CANONICAL_ABI`: the calldata isn't the exact standard ABI encoding the target reads. Usually extra bytes
   appended after the arguments (an attribution suffix, for example), or a Universal Router V3 path with leftover
-  bytes. Encode it with a standard encoder and send it without a suffix. Most Universal Router 2.1.2 calldata
-  seen on chain ends in extra bytes starting with `unix` (`0x756e6978…`); drop everything after the arguments
-  of `execute`. If every swap gets this code without a suffix, the calldata is built for a different router
+  bytes. Encode it with a standard encoder and send it without a suffix. Uniswap's `unix` tag is accepted only
+  in its two exact forms, once, at the end of a direct call to a 2.1.1/2.1.2 router's `execute` or
+  `executeSigned` (see [POLICY](POLICY.md#universal-router-calldata-tag)); a tagged router call inside
+  Multicall3 or a smart account batch, or one sent to a 2.0 router, still gets this code, as does any tag
+  when `universalRouter.calldataTag` is `"refuse"`. If every swap gets this code without a suffix, the calldata is built for a different router
   version than the address it's sent to: 2.1 inputs to a 2.0 router, 2.0 inputs to a 2.1 router, or a router
   the guard doesn't list as 2.1 (2.2, or a chain without a built-in template), which it reads as 2.0.
 - `ROUTER_V4_HOOK_NOT_ALLOWED`: the swap goes through a Uniswap v4 pool with a hook. Route through pools without

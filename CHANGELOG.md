@@ -22,6 +22,15 @@ swaps. All 2.0 rules hold unchanged, and calls to any other router are judged ex
 - New deny code `ROUTER_V4_HOOK_NOT_ALLOWED` and policy key `universalRouter.v4Hooks`: a v4 pool or path hop
   with a non-zero hook is refused unless the hook is listed.
 - `executeSigned(bytes,bytes[],bytes32,bytes32,bool,bytes32,bytes,uint256)` (2.1) is unpacked like `execute`.
+- The `unix` calldata tag that Uniswap's Trading API appends to Universal Router 2.1.2 calls is taken off
+  before decoding when the transaction itself calls `execute` or `executeSigned` on a built-in 2.1.1/2.1.2
+  address for its chain, and the calldata ends in exactly one tag of one of two exact forms (the 10-byte
+  value `0x756e697800000000000c`, or 22 bytes: `unix`, a millisecond timestamp, `0x8000`, six free bytes,
+  `0x01` or `0x02`, `0x00`). What is left must be the exact canonical encoding. The router never reads calldata
+  past its arguments, so the tag can't change what it does. 94 of 96 sampled 2.1.2 transactions carry one.
+  New policy key `universalRouter.calldataTag`: `"strip"` (default) or `"refuse"`.
+- Decision log lines, `l2sg` response metadata and `Guard.check` results have a `notes` list; a stripped tag is
+  named there.
 
 ### Changed
 
@@ -35,9 +44,9 @@ swaps. All 2.0 rules hold unchanged, and calls to any other router are judged ex
 
 ### Still refused
 
-- Bytes after the ABI encoding of the arguments. 94 of 96 Universal Router 2.1.2 transactions sampled on
-  mainnets in October 2026 carry such a suffix (starting `0x756e6978`, "unix"), so they are refused as sent
-  and pass only once it is removed.
+- Bytes after the ABI encoding of the arguments, other than the one tag above: another length or prefix, two
+  tags, a tag plus other bytes, a tag on a call inside a wrapper (Multicall3, a smart account batch) or inside
+  a command or v4 action, a tag on a 2.0 router or any other contract.
 - `ACROSS_V4_DEPOSIT_V3` (`0x40`) and every other command in `0x40`–`0x7f`; `V4_SWAP` on a 2.0 router; v4
   liquidity and other non-swap actions; Universal Router 2.2 and routers or chains not in the built-in list
   (read as 2.0); Uniswap `SwapProxy`.

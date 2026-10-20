@@ -311,13 +311,25 @@ close the gap:
   and other contracts that take Universal Router-style plans (calls to them are ordinary calls, judged by their
   destination's `selectors`).
 
-  **Most 2.1.2 calldata seen on chain is refused as sent.** 94 of 96 2.1.2 transactions sampled on Ethereum,
-  OP Mainnet, Base and Arbitrum in October 2026 carry 10 to 22 extra bytes after the ABI encoding of
-  `execute()`, starting with the ASCII bytes `unix`. Uniswap doesn't document where they come from. The router
-  ignores them; the guard refuses all trailing bytes (`NON_CANONICAL_ABI`), as it did in 2.0. With the suffix
-  removed, the same transactions decode and pass when the policy allows their payees, hooks and approvals.
-  `@uniswap/universal-router-sdk` with `UniversalRouterVersion.V2_1_2` adds nothing after the arguments; with
-  other builders, strip the bytes after the arguments before signing.
+  **The `unix` calldata tag.** 94 of 96 2.1.2 transactions sampled on Ethereum, OP Mainnet, Base and
+  Arbitrum in October 2026 end in a tag after the ABI encoding of `execute()`: 22 bytes (`unix`, a
+  millisecond timestamp and fixed fields) or the 10-byte value `0x756e697800000000000c`. Uniswap doesn't
+  document it; it appears to come from Uniswap's Trading API. The 2.1.1/2.1.2 contracts never read calldata
+  past the arguments, so the tag can't change what the router does. The guard takes one such tag off before
+  decoding, only when all of these hold:
+  - the transaction itself calls `execute(bytes,bytes[],uint256)`, `execute(bytes,bytes[])` or `executeSigned`
+    on a built-in 2.1.1/2.1.2 address for that chain;
+  - the calldata ends in exactly one tag of the exact form in [POLICY](docs/POLICY.md#universal-router-calldata-tag);
+  - what is left is the exact canonical encoding.
+  The rest of the plan is judged as usual, and the decision log line carries a `notes` entry naming the tag.
+  Anything else after the arguments is still `NON_CANONICAL_ABI`: another length or prefix, a second tag, a
+  tag plus other bytes, a tag on a call inside Multicall3 or another wrapper, inside a command or v4 action,
+  or on a 2.0 router (none of 93 sampled Base 2.0 transactions carried one). Set
+  `"universalRouter": { "calldataTag": "refuse" }` to refuse tagged calldata as 2.1.0 used to. With the tag
+  allowed, the 96 sampled transactions are judged on their contents: under a policy that lists only the router
+  (and a one-year Permit2 expiry), 69 pass and 27 are refused for a token, hook or payee the policy doesn't
+  list; with their payees, hooks and tokens listed, 79 pass and 17 are refused because they sign an unlimited
+  Permit2 approval.
 
   Prices are still not checked: `amountOutMinimum` and `minHopPriceX36` are not judged, a v4 pool can have any
   fee, and a token on your list can be swapped for any token. Bound what a swap can spend with capped
@@ -368,7 +380,7 @@ close the gap:
 | `L2SG_WATCH_EXPECTED_SENDERS` | — | Senders you expect money from; others are quarantined |
 | `L2SG_WATCH_DUST_RAW` | `0` | Inbound amounts at or below this are dust |
 | `L2SG_WATCH_INTERVAL_SECONDS` | `15` | Poll interval |
-| `L2SG_DECISION_LOG` | — | Append one JSON line per decision to this file |
+| `L2SG_DECISION_LOG` | — | Append one JSON line per decision to this file. A line has `notes` when the guard changed how it read the transaction (a stripped Universal Router calldata tag) |
 | `L2SG_HOST` / `L2SG_PORT` | `127.0.0.1` / `8545` | Listen address |
 
 Configuration errors stop the process at startup with a message; the proxy never runs with a policy silently off.
@@ -426,8 +438,9 @@ No policy changes are needed. What changes:
 - `executeSigned(bytes,bytes[],bytes32,bytes32,bool,bytes32,bytes,uint256)` is unpacked like `execute` on every
   contract, so its commands are judged even when the destination has `"allowAnySelector": true`. Add it to the
   router's `selectors` to use it.
-- The guard still refuses bytes after the arguments. Calldata from the Uniswap app or Trading API that carries
-  a suffix must have it removed first.
+- The `unix` calldata tag that most Uniswap Trading API transactions carry after the arguments of a direct call
+  to a 2.1 router is taken off before decoding and noted in the decision log; any other trailing bytes are
+  still refused. To keep refusing the tag, set `"universalRouter": { "calldataTag": "refuse" }`.
 
 ### From l2-send-guard 1.x to 2.0
 
@@ -462,7 +475,8 @@ on it, so allowlisting a DEX router allowed its admin and sweep functions too. I
 - Calldata the guard decodes must be the exact standard encoding, with nothing after the arguments
   (`NON_CANONICAL_ABI`). Standard ABI encoders such as viem and ethers produce it; drop any suffix you append to
   calldata, such as an attribution tag. Universal Router V3 paths must be whole pools (20 + 23·k bytes).
-  (2.0 refused Universal Router 2.1 swaps; 2.1.0 reads them, see [below](#from-l2-send-guard-20-to-21).)
+  (2.0 refused Universal Router 2.1 swaps; 2.1.0 reads them and takes off one Uniswap `unix` tag, see
+  [below](#from-l2-send-guard-20-to-21).)
 - Calldata over 128 KiB is refused (`CALLDATA_TOO_LARGE`).
 - A key written twice in one object of a policy file (for example the same destination twice) is refused.
   Before, the last one silently won.
