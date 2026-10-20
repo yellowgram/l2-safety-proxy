@@ -270,8 +270,10 @@ close the gap:
   appear later through CREATE2 or an EIP-7702 delegation). Calldata decides: a send with empty calldata is a
   plain transfer and needs no function list; anything with calldata needs one. A plain transfer to a contract
   still runs its `receive`/fallback code (WETH's deposits, for example), so cap it with `maxNativeWei`.
-- **Swaps.** Universal Router commands are checked for recipients (the output must go to the sender or a listed
-  recipient); unknown commands are refused. Prices and slippage are not checked, and the amount a swap spends
+- **Swaps.** Universal Router commands are checked for recipients: the output must go to the sender, one of
+  `accounts`, a listed recipient, or the router running the command. Each payout is bound to its own router, and
+  `MSG_SENDER` means the router's real caller, so a swap inside Multicall3 can't pay Multicall3 (or another
+  contract in the transaction) where anyone could take it (`ROUTER_PAYOUT_TO_WRAPPER`). Unknown commands are refused. Prices and slippage are not checked, and the amount a swap spends
   is bounded only by the token approvals the router (or Permit2) holds. Keep those approvals capped.
 - **Your own accounts.** Calls the agent's Safe or smart account makes are judged one by one, and the account's
   own admin functions (`enableModule`, `addOwnerWithThreshold`, `swapOwner`, `changeThreshold`, `setGuard`,
@@ -378,6 +380,10 @@ on it, so allowlisting a DEX router allowed its admin and sweep functions too. I
   covers it (it runs the contract's fallback).
 - ETH sent along with a token call (`transfer`, `approve`, …) must be allowed by the token's own destination
   entry, its `selectors` and `maxNativeWei`. Before, any listing of the token as a destination was enough.
+- Universal Router payouts are bound to their own router. A swap, sweep or transfer that pays another contract
+  in the same transaction (the Multicall3 that called the router, a second router) is refused
+  (`ROUTER_PAYOUT_TO_WRAPPER`), and `MSG_SENDER` now means the router's real caller. Inside Multicall3, pay the
+  sender's address explicitly. Payouts to your `accounts` are allowed.
 - `migrate-policy` writes 0.x destinations as `"type": "eoa"`. Replace that with a `selectors` list for any
   contract you call.
 - Library: `selectorWarnings(policy)` returns the warnings for `allowAnySelector` destinations; log them if you

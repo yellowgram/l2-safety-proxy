@@ -62,7 +62,7 @@ every such destination. See [Contract destinations](#contract-destinations).
 | `delegation.delegates` | none | Contracts the account may delegate to |
 | `delegation.allowAnyChain` | `false` | Allow authorizations signed for chain id 0 (valid on every chain) |
 | `accounts` | none | Smart accounts the agent owns (its Safe, its 4337 wallet). Calls they make are checked one by one, they don't need to be destinations, and their admin functions (modules, owners, threshold, guards, fallback handler) are always refused. So is any other function called on the account itself (or on the sender) that is not a wrapper the guard unpacks (`execute`, `executeBatch`, 7579 `execute`, `multicall`), such as `upgradeToAndCall` or `addOwnerAddress`. An address can't be both an account and a destination |
-| `universalRouter.recipients` | none | Extra addresses a swap's output may go to (the sender and the router always may) |
+| `universalRouter.recipients` | none | Extra addresses a swap's output may go to. The sender, one of `accounts`, and the router that runs the command (`ADDRESS_THIS`) always may; any other contract in the same transaction (Multicall3, another router) may not (`ROUTER_PAYOUT_TO_WRAPPER`) unless listed here |
 | `allowContractCreation` | `false` | Allow deploying contracts |
 | `typedData.allowUnknown` | `false` | Let the guarded signer sign EIP-712 messages it can't check |
 | `note` | — | Free text on destinations and tokens, ignored |
@@ -160,6 +160,7 @@ such as `transferWithAuthorization`, is allowed. `check-policy` warns about this
 | `MALFORMED_BATCH` | A batch that doesn't decode cleanly |
 | `ROUTER_COMMAND_UNCHECKED` | A Universal Router command the guard can't check |
 | `ROUTER_RECIPIENT_NOT_ALLOWED` | Swap output going to someone else |
+| `ROUTER_PAYOUT_TO_WRAPPER` | Swap output going to another contract in the same transaction (e.g. the Multicall3 that called the router, directly or through the `MSG_SENDER` constant), where anyone could take it |
 | `WINDOW_CAP_EXCEEDED` | Over a rolling cap |
 | `TYPED_DATA_UNKNOWN` | (guarded signer) EIP-712 message it can't check |
 | `TYPED_DATA_AUTHORIZES_TX` | (guarded signer) `SafeTx`, `SafeMessage` or a 4337 user operation: always refused |

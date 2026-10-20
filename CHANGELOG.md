@@ -20,6 +20,15 @@ on it, so allowlisting a contract such as a DEX router allowed all of its functi
   `maxNativeWei`). Before, any listing of the token as a destination was enough.
 - `migrate-policy` writes 0.x destinations as `"type": "eoa"`, with a note to add `selectors` for contracts.
 - `"selectors": "*"` is refused with a pointer to `allowAnySelector`.
+- Universal Router payouts are bound to the router that runs the command. A payout may go to the sender, one of
+  `accounts`, a `universalRouter.recipients` entry, or that router itself (`ADDRESS_THIS`). In 1.x a payout to
+  any other wrapper in the same transaction was accepted, so `Multicall3 → router` could sweep tokens into
+  Multicall3, where anyone can take them. That is now refused with the new deny code `ROUTER_PAYOUT_TO_WRAPPER`.
+  The router's `MSG_SENDER` recipient now resolves to the router's actual caller (Multicall3, the agent's Safe,
+  a MultiSend contract), not always to the transaction's sender; in 1.x `MSG_SENDER` inside `Multicall3 → router`
+  was judged as "the sender" while the funds went to Multicall3.
+- A payout to one of `accounts` is allowed even when that account isn't part of the transaction (in 1.x only
+  when it was a wrapper in it).
 
 ### Added
 

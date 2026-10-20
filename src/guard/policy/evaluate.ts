@@ -87,9 +87,20 @@ function run(policy: Policy, tx: TxInput, opts: EvaluateOptions, spend: Spend) {
   spend.native += tx.value;
   for (const leaf of flat.leaves) {
     if (leaf.kind === "payout") {
+      // A payout may go to the sender, one of the agent's accounts, a listed recipient, or the
+      // router that runs the command (ADDRESS_THIS), and nowhere else. In particular not to another
+      // contract in the same transaction (Multicall3, a second router): anyone can take funds left there.
       const r = lc(leaf.recipient);
-      if (r !== sender && !policy.universalRouter.recipients.has(r) && !flat.wrappers.some((w) => lc(w.to) === r)) {
-        throw new Deny("ROUTER_RECIPIENT_NOT_ALLOWED", `router pays out to ${leaf.recipient}, which is not the sender or an allowed recipient`, leaf.path);
+      const router = lc(leaf.router);
+      if (r !== sender && r !== router && !policy.accounts.has(r) && !policy.universalRouter.recipients.has(r)) {
+        if (flat.wrappers.some((w) => lc(w.to) === r)) {
+          throw new Deny(
+            "ROUTER_PAYOUT_TO_WRAPPER",
+            `router ${router} pays out to ${r}, another contract in this transaction; funds left there can be taken by anyone. Pay the sender instead`,
+            leaf.path
+          );
+        }
+        throw new Deny("ROUTER_RECIPIENT_NOT_ALLOWED", `router ${router} pays out to ${leaf.recipient}, which is not the sender or an allowed recipient`, leaf.path);
       }
       continue;
     }

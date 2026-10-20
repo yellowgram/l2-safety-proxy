@@ -16,7 +16,13 @@ import {
  */
 export type Leaf =
   | { kind: "call"; to?: Address; value: bigint; data: Hex; path: string; fromAccount: boolean }
-  | { kind: "payout"; recipient: Address; path: string };
+  | {
+      kind: "payout";
+      recipient: Address;
+      /** The Universal Router that runs the command. A payout may go to it (ADDRESS_THIS), never to another contract in the tx. */
+      router: Address;
+      path: string;
+    };
 
 /** A wrapper the guard opened, and who it ran as. */
 export interface Wrapper {
@@ -59,7 +65,7 @@ export function flattenCalls(
   ctx: FlattenContext
 ): Flattened {
   const out: Flattened = { leaves: [], wrappers: [] };
-  walk({ to: tx.to, value: tx.value, data: tx.data }, ctx, out, 0, "tx", true);
+  walk({ to: tx.to, value: tx.value, data: tx.data }, ctx, out, 0, "tx", true, ctx.sender);
   return out;
 }
 
@@ -69,7 +75,9 @@ function walk(
   out: Flattened,
   depth: number,
   path: string,
-  fromAccount: boolean
+  fromAccount: boolean,
+  /** msg.sender of this call: the sender at the top level, else the wrapper that makes the call. */
+  caller: Address | undefined
 ): void {
   if (depth > MAX_DEPTH) throw new DecodeDenied("TOO_DEEP", `wrappers nested deeper than ${MAX_DEPTH}`, path);
   const leaf = (): void => void out.leaves.push({ kind: "call", to: call.to, value: call.value, data: call.data, path, fromAccount });
@@ -94,8 +102,10 @@ function walk(
   // judged by that destination's rule.
   const accountOnly = d.signature.startsWith("execute(address") || d.signature.startsWith("executeBatch") || d.signature === "execute(bytes32,bytes)" || d.signature === "execute((address,uint256,bytes)[])";
   if (accountOnly && !isAccount) return leaf();
-  const sub = (i: number, c: { to?: Address; value: bigint; data: Hex }, asAccount: boolean) =>
-    walk(c, ctx, out, depth + 1, `${path}>${d!.name}[${i}]`, asAccount);
+  // Inner calls of a wrapper are made by the wrapper itself (msg.sender = to), except
+  // multicall(bytes[]) entries, which are delegatecalled and keep this call's msg.sender.
+  const sub = (i: number, c: { to?: Address; value: bigint; data: Hex }, asAccount: boolean, innerCaller: Address | undefined = to) =>
+    walk(c, ctx, out, depth + 1, `${path}>${d!.name}[${i}]`, asAccount, innerCaller);
 
   switch (d.signature) {
     case "aggregate((address,bytes)[])":
@@ -128,7 +138,7 @@ function walk(
       // Each entry is delegatecalled on the same contract.
       wrap(isAccount ? "account" : "router");
       const items = d.args[d.args.length - 1] as Hex[];
-      items.forEach((data, i) => sub(i, { to, value: 0n, data }, isAccount));
+      items.forEach((data, i) => sub(i, { to, value: 0n, data }, isAccount, caller));
       return;
     }
     case "execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)": {
@@ -143,7 +153,8 @@ function walk(
         if (!inner || inner.name !== "multiSend") {
           throw new DecodeDenied("DELEGATECALL_DENIED", "Safe DELEGATECALL to MultiSend without multiSend calldata", path);
         }
-        unpackMultiSend(inner.args[0] as Hex, `${path}>execTransaction>multiSend`, ctx, out, depth + 1, true);
+        // DELEGATECALL: the entries run as the Safe.
+        unpackMultiSend(inner.args[0] as Hex, `${path}>execTransaction>multiSend`, ctx, out, depth + 1, true, to);
         return;
       }
       sub(0, { to: innerTo, value, data }, true);
@@ -152,7 +163,7 @@ function walk(
     case "multiSend(bytes)": {
       // Called directly (not via Safe DELEGATECALL): runs as the MultiSend contract.
       wrap(isAccount ? "account" : "router");
-      unpackMultiSend(d.args[0] as Hex, `${path}>multiSend`, ctx, out, depth + 1, isAccount);
+      unpackMultiSend(d.args[0] as Hex, `${path}>multiSend`, ctx, out, depth + 1, isAccount, to);
       return;
     }
     case "execute(address,uint256,bytes)": {
@@ -220,14 +231,14 @@ function walk(
     case "execute(bytes,bytes[])":
     case "execute(bytes,bytes[],uint256)": {
       wrap("router");
-      universalRouter(d.args[0] as Hex, d.args[1] as Hex[], to, ctx, out, depth + 1, `${path}>execute`);
+      universalRouter(d.args[0] as Hex, d.args[1] as Hex[], to, caller, ctx, out, depth + 1, `${path}>execute`);
       return;
     }
   }
   leaf();
 }
 
-function unpackMultiSend(packed: Hex, path: string, ctx: FlattenContext, out: Flattened, depth: number, asAccount: boolean) {
+function unpackMultiSend(packed: Hex, path: string, ctx: FlattenContext, out: Flattened, depth: number, asAccount: boolean, caller: Address) {
   const n = size(packed);
   let off = 0;
   let i = 0;
@@ -240,7 +251,7 @@ function unpackMultiSend(packed: Hex, path: string, ctx: FlattenContext, out: Fl
     if (off + 85 + len > n) throw new DecodeDenied("MALFORMED_BATCH", "truncated multiSend data", path);
     const data = len === 0 ? "0x" : sliceHex(packed, off + 85, off + 85 + len);
     if (op !== 0) throw new DecodeDenied("DELEGATECALL_DENIED", `multiSend entry ${i} uses DELEGATECALL`, `${path}[${i}]`);
-    walk({ to, value, data }, ctx, out, depth, `${path}[${i}]`, asAccount);
+    walk({ to, value, data }, ctx, out, depth, `${path}[${i}]`, asAccount, caller);
     off += 85 + len;
     i++;
   }
@@ -276,17 +287,21 @@ function urDecode(types: string, input: Hex, path: string): readonly unknown[] {
   }
 }
 
-function universalRouter(commands: Hex, inputs: Hex[], router: Address, ctx: FlattenContext, out: Flattened, depth: number, path: string) {
+/**
+ * `caller` is the router's msg.sender: the sender for a direct call, or the wrapper (Multicall3, the
+ * agent's Safe, …) that calls the router. Universal Router's MSG_SENDER recipient means that address.
+ */
+function universalRouter(commands: Hex, inputs: Hex[], router: Address, caller: Address | undefined, ctx: FlattenContext, out: Flattened, depth: number, path: string) {
   if (depth > MAX_DEPTH) throw new DecodeDenied("TOO_DEEP", `wrappers nested deeper than ${MAX_DEPTH}`, path);
   const n = size(commands);
   if (n !== inputs.length) throw new DecodeDenied("MALFORMED_BATCH", "Universal Router commands/inputs length mismatch", path);
   const recipient = (r: Address): Address => {
     const l = lc(r);
-    if (l === UR_MSG_SENDER) return (ctx.sender ?? r) as Address;
+    if (l === UR_MSG_SENDER) return (caller ?? r) as Address;
     if (l === UR_ADDRESS_THIS) return router;
     return r;
   };
-  const payout = (r: Address, p: string) => out.leaves.push({ kind: "payout", recipient: recipient(r), path: p });
+  const payout = (r: Address, p: string) => out.leaves.push({ kind: "payout", recipient: recipient(r), router, path: p });
   const permit2Leaf = (data: Hex, p: string) =>
     out.leaves.push({ kind: "call", to: ctx.permit2 as Address, value: 0n, data, path: p, fromAccount: true });
 
@@ -356,7 +371,7 @@ function universalRouter(commands: Hex, inputs: Hex[], router: Address, ctx: Fla
       }
       case UR.EXECUTE_SUB_PLAN: {
         const [subCommands, subInputs] = urDecode("bytes, bytes[]", input, p) as [Hex, Hex[]];
-        universalRouter(subCommands, subInputs, router, ctx, out, depth + 1, `${p}>subplan`);
+        universalRouter(subCommands, subInputs, router, caller, ctx, out, depth + 1, `${p}>subplan`);
         break;
       }
       default:
