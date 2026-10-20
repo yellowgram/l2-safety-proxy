@@ -10,6 +10,9 @@ interface Ctx {
 
 const lc = (a: unknown) => String(a).toLowerCase();
 
+/** Safe transactions, Safe messages and ERC-4337 user operations. */
+const TX_AUTHORIZING_TYPES = new Set(["SafeTx", "SafeMessage", "PackedUserOperation", "UserOperation"]);
+
 /**
  * Judge an EIP-712 signature request (Permit2 permits, EIP-2612 and DAI permits)
  * with the same token rules as on-chain approvals. Off-chain permits are where
@@ -93,6 +96,14 @@ export function checkTypedData(policy: Policy, typed: TypedDataDefinition, ctx: 
     }
   }
 
+  // These authorize an on-chain transaction from a smart account. The policy can't see
+  // what they execute, so they are refused even when allowUnknown is set.
+  if (TX_AUTHORIZING_TYPES.has(String(typed.primaryType))) {
+    return deny(
+      "TYPED_DATA_AUTHORIZES_TX",
+      `typed data ${typed.primaryType} authorizes a transaction from a smart account; send that transaction through the guard instead`
+    );
+  }
   if (policy.typedData.allowUnknown) return { allow: true, spend };
   return deny(
     "TYPED_DATA_UNKNOWN",

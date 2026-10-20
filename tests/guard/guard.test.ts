@@ -148,7 +148,13 @@ describe("idempotency (audit claim 3)", () => {
   it("classifies upstream answers", () => {
     expect(classifyUpstream({}, false)).toBe("accepted");
     expect(classifyUpstream({ error: { message: "already known" } }, false)).toBe("accepted");
-    expect(classifyUpstream({ error: { message: "nonce too low" } }, false)).toBe("rejected");
+    expect(classifyUpstream({ error: { message: "nonce too low" } }, false)).toBe("nonce_used");
+    expect(classifyUpstream({ error: { message: "insufficient funds for gas * price + value" } }, false)).toBe("rejected");
+    expect(classifyUpstream({ error: { code: -32602, message: "invalid argument 0" } }, false)).toBe("rejected");
+    // EIP-7966: code 4 = in the mempool, wait timed out. Not a rejection.
+    expect(classifyUpstream({ error: { code: 4, message: "The transaction was added to the mempool but wasn't processed within the designated timeout interval." } }, false)).toBe("unknown");
+    expect(classifyUpstream({ error: { code: -32000, message: "upstream timeout" } }, false)).toBe("unknown");
+    expect(classifyUpstream({ error: { code: -32603, message: "internal error" } }, false)).toBe("unknown");
     expect(classifyUpstream(undefined, true)).toBe("unknown");
   });
 });

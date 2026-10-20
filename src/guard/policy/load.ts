@@ -136,6 +136,15 @@ export function parsePolicy(json: unknown, source = "policy"): Policy {
     fail(`${source}.allowContractCreation`, "must be a boolean");
   }
 
+  const accounts = addrs(root.accounts, `${source}.accounts`);
+  for (const a of accounts) {
+    if (destinations.has(a)) {
+      fail(
+        `${source}.destinations.${a}`,
+        "is also listed in accounts. Calls the agent makes through its own account are checked one by one; listing the account as a destination would let any call to it through, including adding owners or modules. Remove it from destinations"
+      );
+    }
+  }
   return {
     chains,
     windowSeconds: positiveInt(window.seconds, `${source}.window.seconds`, 86_400),
@@ -151,7 +160,7 @@ export function parsePolicy(json: unknown, source = "policy"): Policy {
       maxExpirySeconds: positiveInt(p2.maxExpirySeconds, `${source}.permit2.maxExpirySeconds`, 30 * 86_400),
     },
     delegation: { mode, delegates: addrs(del.delegates, `${source}.delegation.delegates`), allowAnyChain: del.allowAnyChain === true },
-    accounts: addrs(root.accounts, `${source}.accounts`),
+    accounts,
     universalRouter: { recipients: addrs(ur.recipients, `${source}.universalRouter.recipients`) },
     allowContractCreation: root.allowContractCreation === true,
     typedData: { allowUnknown: td.allowUnknown === true },

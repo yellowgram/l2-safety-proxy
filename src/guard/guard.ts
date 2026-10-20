@@ -47,7 +47,7 @@ export type Check =
     }
   | {
       action: "deny";
-      code: DenyCode | "IDEMPOTENCY_CONFLICT" | "CHAIN_READ_FAILED";
+      code: DenyCode | "IDEMPOTENCY_CONFLICT" | "CHAIN_READ_FAILED" | "INTERNAL_ERROR";
       reason: string;
       path?: string;
       tx?: SignedTx;
@@ -55,16 +55,41 @@ export type Check =
       priorTxHash?: string;
     };
 
-export type Outcome = "accepted" | "rejected" | "unknown";
+/**
+ * What the upstream did with a forwarded tx.
+ * - accepted: in the node (result, or "already known").
+ * - rejected: definitely refused and can never be included as sent (a known validation error).
+ * - nonce_used: "nonce too low". Either this tx was already mined (a rebroadcast) or another
+ *   tx took the nonce. This one can't be included now, but the slot's record isn't erased
+ *   unless the chain shows this tx isn't there.
+ * - unknown: anything else, including an eth_sendRawTransactionSync timeout (EIP-7966 code 4:
+ *   added to the mempool, not yet included), 5xx, network errors and unrecognized messages.
+ *   Caps and the Idempotency-Key stay held.
+ */
+export type Outcome = "accepted" | "rejected" | "nonce_used" | "unknown";
 
 /** Upstream errors that mean the tx is already in the node (not a refusal). */
 const ALREADY_KNOWN = /already known|known transaction|already imported|already exists|alreadyknown/i;
+const NONCE_USED = /nonce too low|nonce has already been used|nonce already used|old nonce/i;
+/** Validation errors after which the tx is not in the node and can't get there unchanged. */
+const DEFINITE_REJECTION =
+  /insufficient funds|intrinsic gas too low|exceeds block gas limit|gas limit reached|(max )?fee (per gas |cap )?less than block base fee|transaction underpriced|replacement transaction underpriced|invalid sender|invalid signature|invalid chain ?id|chain ?id mismatch|exceeds the configured cap|oversized data|nonce too high|transaction type not supported|tx type not supported|max priority fee per gas higher than max fee per gas|tip higher than fee cap|rlp:|txpool is full/i;
+/** JSON-RPC codes that mean the request itself was refused before any tx handling. */
+const REQUEST_REFUSED = new Set([-32700, -32600, -32601, -32602]);
 
-export function classifyUpstream(res: { error?: { message?: string } } | undefined, threw: boolean): Outcome {
+export function classifyUpstream(res: { error?: { code?: number; message?: string } } | undefined, threw: boolean): Outcome {
   if (threw || !res) return "unknown";
   if (!res.error) return "accepted";
-  return ALREADY_KNOWN.test(res.error.message ?? "") ? "accepted" : "rejected";
+  const msg = res.error.message ?? "";
+  if (ALREADY_KNOWN.test(msg)) return "accepted";
+  if (NONCE_USED.test(msg)) return "nonce_used";
+  if (typeof res.error.code === "number" && REQUEST_REFUSED.has(res.error.code)) return "rejected";
+  if (DEFINITE_REJECTION.test(msg)) return "rejected";
+  return "unknown";
 }
+
+/** Rolling caps apply per sender across every chain in the policy (docs/POLICY.md). */
+const CAP_SCOPE_ALL_CHAINS = 0;
 
 /**
  * The guard: policy, rolling caps, idempotency and bypass detection around one
@@ -111,7 +136,10 @@ export class Guard {
       throw err;
     }
     if (!tx.from || tx.nonce === undefined) return deny("SENDER_UNRECOVERABLE", "can't recover the sender from the signature", undefined, tx);
-    const chainId = tx.chainId ?? ctx.chainId;
+    if (tx.chainId === undefined) {
+      return deny("REPLAYABLE_TX", "legacy transaction without a chain id (pre-EIP-155) can be replayed on every chain; sign it with a chain id", undefined, tx);
+    }
+    const chainId = tx.chainId;
     const store = this.opts.store;
     const key = ctx.idempotencyKey?.trim() || undefined;
     if (key && Buffer.byteLength(key) > 255) return deny("IDEMPOTENCY_CONFLICT", "idempotency key is longer than 255 bytes", undefined, tx);
@@ -146,7 +174,13 @@ export class Guard {
         }
       }
 
-      const verdict = evaluateTx(this.opts.policy, tx, { chainId, now: this.now(), poisoned: await store.poisoned() });
+      const poisoned = await store.poisoned();
+      let verdict: ReturnType<typeof evaluateTx>;
+      try {
+        verdict = evaluateTx(this.opts.policy, tx, { chainId, now: this.now(), poisoned });
+      } catch (err) {
+        return deny("INTERNAL_ERROR", `the policy check failed unexpectedly, refusing to send: ${(err as Error).message}`, undefined, tx);
+      }
       if (!verdict.allow) return deny(verdict.code!, verdict.reason!, verdict.path, tx);
 
       const p = this.opts.policy;
@@ -154,7 +188,7 @@ export class Guard {
       for (const [t, rule] of p.tokens) if (rule.windowMaxAmountRaw !== undefined) limits.tokens.set(t, rule.windowMaxAmountRaw);
       let reservationId: string | undefined;
       if (limits.native !== undefined || limits.tokens.size > 0) {
-        const r = await store.reserveSpend(chainId, tx.from, verdict.spend, limits, p.windowSeconds, this.now());
+        const r = await store.reserveSpend(CAP_SCOPE_ALL_CHAINS, tx.from, verdict.spend, limits, p.windowSeconds, this.now());
         if (!r.ok) {
           return deny(
             "WINDOW_CAP_EXCEEDED",
@@ -215,14 +249,23 @@ export class Guard {
       }
       return;
     }
+    // "nonce too low": this tx can't be included now. It was either mined already (a
+    // rebroadcast) or another tx took the nonce. Give back this send's reservation, but
+    // never erase the nonce's sent record: a rebroadcast of a mined tx would otherwise make
+    // the next send look like a bypass. A foreign tx on that nonce is caught by the bypass
+    // check that runs before every forward. The idempotency record stays in flight and is
+    // resolved from chain state on the next use of the key.
+    if (outcome === "nonce_used") {
+      if (check.reservationId) await store.releaseSpend(check.reservationId);
+    }
     if (outcome === "rejected") {
       if (check.reservationId) await store.releaseSpend(check.reservationId);
       await store.forgetSent(chainId, tx.from!, tx.nonce!, tx.hash);
       for (const a of tx.authorizationList) if (a.authority) await store.forgetSent(chainId, a.authority, a.nonce, tx.hash);
     }
-    if (check.idempotencyKey) {
+    if (check.idempotencyKey && (outcome === "accepted" || outcome === "rejected")) {
       const rec = await store.getIdem(check.idempotencyKey);
-      if (rec && rec.txHash === tx.hash && outcome !== "unknown") {
+      if (rec && rec.txHash === tx.hash) {
         await store.putIdem({ ...rec, status: outcome === "accepted" ? "sent" : "rejected", updatedAt: this.now() });
       }
     }
@@ -296,6 +339,6 @@ function lockedMessage(sender: string, reason: string): string {
   return `sends from ${sender} are locked: ${reason}. Investigate, then run: l2-send-guard unlock ${sender}`;
 }
 
-function deny(code: DenyCode | "IDEMPOTENCY_CONFLICT" | "CHAIN_READ_FAILED", reason: string, path?: string, tx?: SignedTx): Check {
+function deny(code: DenyCode | "IDEMPOTENCY_CONFLICT" | "CHAIN_READ_FAILED" | "INTERNAL_ERROR", reason: string, path?: string, tx?: SignedTx): Check {
   return { action: "deny", code, reason, path, tx };
 }

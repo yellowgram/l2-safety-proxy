@@ -213,22 +213,47 @@ const HINTS: Record<string, string> = {
   CHAIN_READ_FAILED: "The guard couldn't read the sender's nonce from the upstream RPC, so it refused to send. Nothing was sent; retry, or check the RPC.",
   BYPASS_LOCKED: "A transaction from this sender reached the chain without going through the guard. Find out why, then run: l2-send-guard unlock <address> --chain <id>.",
   METHOD_NOT_GATED: "This method submits transactions in a way the guard can't check. Use eth_sendRawTransaction.",
+  INTERNAL_ERROR: "The guard hit an unexpected error while checking this transaction, so it refused to send. Please report it with the decision log entry.",
+  REPLAYABLE_TX: "Sign the transaction with a chain id (EIP-155 or a typed transaction).",
 };
+
+/**
+ * True if any object in the request has two keys that differ only in case.
+ * geth (up to 1.17.5), op-geth and Nitro decode JSON-RPC with Go's case-insensitive
+ * field matching, last key wins: `{"params":[A],"Params":[B]}` would be judged on A and
+ * executed on B. Such a request is refused rather than guessed at.
+ */
+export function hasCaseVariantKeys(v: unknown, depth = 0): boolean {
+  if (depth > 64) return true;
+  if (Array.isArray(v)) return v.some((x) => hasCaseVariantKeys(x, depth + 1));
+  if (v === null || typeof v !== "object") return false;
+  const seen = new Set<string>();
+  for (const k of Object.keys(v)) {
+    const f = k.toLowerCase();
+    if (seen.has(f)) return true;
+    seen.add(f);
+    if (hasCaseVariantKeys((v as Record<string, unknown>)[k], depth + 1)) return true;
+  }
+  return false;
+}
+
+const HEX = /^0x[0-9a-fA-F]*$/;
+const HASH32 = /^0x[0-9a-fA-F]{64}$/;
 
 /** The signed txs a send method carries. `null` = not a send method. */
 export function extractSignedTxs(req: JsonRpcRequest): { raws: string[]; bundle: boolean } | { error: string } | null {
   const p0 = req.params?.[0] as unknown;
   if (SEND_METHODS.has(req.method)) {
-    return typeof p0 === "string" && p0.startsWith("0x") ? { raws: [p0], bundle: false } : { error: "expected hex raw transaction" };
+    return typeof p0 === "string" && HEX.test(p0) ? { raws: [p0], bundle: false } : { error: "expected hex raw transaction" };
   }
   if (!WRAPPED_SEND_METHODS.has(req.method)) return null;
   if (req.method === "eth_sendPrivateTransaction") {
     const tx = (p0 as { tx?: unknown } | undefined)?.tx;
-    return typeof tx === "string" && tx.startsWith("0x") ? { raws: [tx], bundle: false } : { error: "expected { tx: hex }" };
+    return typeof tx === "string" && HEX.test(tx) ? { raws: [tx], bundle: false } : { error: "expected { tx: hex }" };
   }
   if (req.method === "eth_sendBundle") {
     const txs = (p0 as { txs?: unknown } | undefined)?.txs;
-    if (!Array.isArray(txs) || txs.length === 0 || !txs.every((t) => typeof t === "string" && t.startsWith("0x"))) {
+    if (!Array.isArray(txs) || txs.length === 0 || !txs.every((t) => typeof t === "string" && HEX.test(t))) {
       return { error: "expected { txs: hex[] }" };
     }
     return { raws: txs as string[], bundle: true };
@@ -239,11 +264,18 @@ export function extractSignedTxs(req: JsonRpcRequest): { raws: string[]; bundle:
     const body = (b as { body?: unknown } | undefined)?.body;
     if (!Array.isArray(body) || depth > 4) return false;
     for (const item of body) {
-      const it = item as { tx?: unknown; hash?: unknown; bundle?: unknown };
-      if (typeof it.tx === "string" && it.tx.startsWith("0x")) raws.push(it.tx);
-      else if (it.bundle !== undefined) {
+      if (item === null || typeof item !== "object") return false;
+      const it = item as Record<string, unknown>;
+      // Exactly one of tx / hash / bundle. A `tx` the guard can't read is refused, never
+      // treated as someone else's already-public hash.
+      const kinds = ["tx", "hash", "bundle"].filter((k) => k in it);
+      if (kinds.length !== 1) return false;
+      if (kinds[0] === "tx") {
+        if (typeof it.tx !== "string" || !HEX.test(it.tx)) return false;
+        raws.push(it.tx);
+      } else if (kinds[0] === "bundle") {
         if (!walk(it.bundle, depth + 1)) return false;
-      } else if (typeof it.hash !== "string") return false;
+      } else if (typeof it.hash !== "string" || !HASH32.test(it.hash)) return false;
     }
     return true;
   };
@@ -309,14 +341,33 @@ function chainMismatchResponse(
  *    -32088; earlier txs of the same request are released.
  * 6. Layer 1 simulate (single txs; bundles are left to the builder). Definite revert →
  *    -32080. Uncertain → -32082 in strict mode (default), forwarded in open mode.
- * 7. Forward, then record what the upstream did (frees caps and keys on a rejection).
+ * 7. Forward the rebuilt request, then record what the upstream did. Caps and keys are
+ *    freed only on a definite rejection; a timeout or unclear error keeps them held.
  */
 export async function handleRequest(
   config: GuardConfig,
-  req: JsonRpcRequest,
+  incoming: JsonRpcRequest,
   headers?: Headers,
   deps: HandlerDeps = {}
 ): Promise<JsonRpcResponse> {
+  // Only what is judged is forwarded: a request rebuilt from the four JSON-RPC fields.
+  // Extra keys are dropped; keys that collide by case anywhere are refused (see above).
+  const id = (incoming as { id?: JsonRpcRequest["id"] } | null)?.id ?? null;
+  if (incoming === null || typeof incoming !== "object" || Array.isArray(incoming) || typeof incoming.method !== "string") {
+    return { jsonrpc: "2.0", id, error: { code: -32600, message: "invalid request: expected a JSON-RPC object with a string method" } };
+  }
+  if (hasCaseVariantKeys(incoming)) {
+    return {
+      jsonrpc: "2.0",
+      id,
+      error: { code: -32600, message: "invalid request: keys that differ only in case (e.g. params/Params) are refused, because upstream nodes may read the other one" },
+    };
+  }
+  if (incoming.params !== undefined && !Array.isArray(incoming.params) && (typeof incoming.params !== "object" || incoming.params === null)) {
+    return { jsonrpc: "2.0", id, error: { code: -32600, message: "invalid request: params must be an array or object" } };
+  }
+  const req: JsonRpcRequest = { jsonrpc: "2.0", id, method: incoming.method, ...(incoming.params !== undefined ? { params: incoming.params } : {}) } as JsonRpcRequest;
+
   const simulate = deps.simulate ?? simulateRawTransaction;
   const forward =
     deps.forward ??

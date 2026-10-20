@@ -115,8 +115,13 @@ on `-32083`, `-32087` and `-32088` and not rebroadcast after `-32080`.
 
 For each signed transaction, in order:
 
+0. **Rebuild the request.** Only `jsonrpc`, `id`, `method` and `params` are kept, and that rebuilt request is
+   what gets forwarded. A request with two keys that differ only in case anywhere inside it (`params` and
+   `Params`, `tx` and `Tx`) is refused: some nodes read keys case-insensitively, so the node could act on a
+   different value from the one the guard judged.
 1. **Parse and recover.** Decode the raw transaction, recover the sender and every 7702 authority.
-   Unparseable or unrecoverable → refused.
+   Unparseable or unrecoverable → refused. A legacy transaction without a chain id (pre-EIP-155) is refused,
+   because it can be replayed on every chain.
 2. **Chain.** The signed `chainId` must match the chain you selected (`x-l2sg-chain` header or the default).
 3. **Bypass lock.** If this sender is locked (see [Threat model](#threat-model-and-limits)), refuse.
 4. **Idempotency.** With a key: the same transaction again returns the first result; a different transaction
@@ -128,10 +133,14 @@ For each signed transaction, in order:
 7. **Simulation.** `eth_simulateV1` (with 7702 code overrides), falling back to `eth_call`. A definite revert is
    refused. If simulation can't decide, `GUARD_MODE=strict` (the default) refuses and `open` forwards.
    Bundles skip this step: the builder simulates them.
-8. **Forward and settle.** Send upstream. A definite upstream rejection releases the reserved spend and the
-   key; anything else keeps them.
+8. **Forward and settle.** Send upstream. Only a definite rejection (a malformed request, insufficient funds,
+   gas or fee errors, a replacement that's underpriced) releases the reserved spend and the key. A timeout, a
+   network error, an unrecognised error, or an `eth_sendRawTransactionSync` "in the mempool but not processed
+   in time" (code 4) are unknown outcomes: the spend stays reserved and the key stays taken until the chain
+   shows what happened. "Nonce too low" releases this send's spend but keeps the record of the nonce.
 
-Nothing is forwarded unless every step passes. A deny is never "fail-open".
+Transactions are not forwarded unless every step passes; a deny is never "fail-open". With `GUARD_MODE=open`
+(step 7), a transaction that passed every policy check is forwarded when simulation can't decide.
 
 ## Library use
 
@@ -146,8 +155,15 @@ const guard = new Guard({ policy: loadPolicyFile("./policy.json"), store: new Fi
 const account = createGuardedSigner(privateKeyToAccount(process.env.KEY as `0x${string}`), guard, { chainId: 84532 });
 // account.signTransaction refuses anything the policy refuses (throws GuardDenied).
 // Typed data is checked too: EIP-2612 Permit and Permit2 messages against the approve rules;
-// any other typed data is refused unless the policy sets typedData.allowUnknown.
+// Safe transactions and ERC-4337 user operations are always refused; any other typed data is
+// refused unless the policy sets typedData.allowUnknown.
+// signMessage is refused unless you pass allowMessage (see below).
 ```
+
+`signMessage` (`personal_sign`) is refused by default. A signature over a 32-byte hash can approve a Safe
+transaction or a user operation, which the policy never sees, and even a text message can be made to hash to
+the same thing. If your agent must sign specific messages (a login, say), pass a predicate:
+`createGuardedSigner(key, guard, { chainId, allowMessage: (m) => m === expectedLoginText })`.
 
 Keep the key in a different process (or a KMS / enclave) from the agent's tools, and hand the agent only
 this account. Signatures count against the rolling caps, so an agent can't stockpile small signatures and
@@ -222,12 +238,16 @@ close the gap:
 
 1. **Prevention: the guarded signer.** Give the agent `createGuardedSigner(...)` and keep the raw key in a
    separate process, KMS or enclave. Then nothing the policy refuses gets signed at all, whichever RPC the agent
-   uses. This is the only configuration in which the policy is binding.
+   uses. This is the only configuration in which the policy holds against the key holder, and only for what
+   the signer signs: if the agent's Safe has other owners or modules, those are outside the guard.
 2. **Detection: the bypass lock.** On every send, the proxy compares the sender's on-chain nonce with the nonces
    it forwarded. If a transaction it never saw has landed, it logs `BYPASS`, POSTs `bypass_detected` to
    `L2SG_ALERT_WEBHOOK`, and (with `L2SG_BYPASS=lock`, the default) refuses that sender with `-32088` until you
-   run `l2-send-guard unlock <address> --chain <id>`. Detection happens on the next send or watch round, after
-   the bypassing transaction has already landed.
+   run `l2-send-guard unlock <address> --chain <id>`. Detection happens on the sender's next send through the
+   proxy, after the bypassing transaction has already landed. Detection is by nonce only: it notices that a
+   transaction it didn't forward used one of the sender's nonces. It can't see actions that don't use the
+   sender's nonce, such as a signed permit or a Safe signature used by someone else. The receive watch
+   separately flags approvals the policy wouldn't allow.
 
 **Other limits, stated plainly:**
 
@@ -236,7 +256,12 @@ close the gap:
   one). Allowlisting a general-purpose router or a smart account you don't control lets it do whatever that
   contract does. Use `selectors` to narrow it.
 - **Swaps.** Universal Router commands are checked for recipients (the output must go to the sender or a listed
-  recipient); unknown commands are refused. Prices and slippage are not checked.
+  recipient); unknown commands are refused. Prices and slippage are not checked, and the amount a swap spends
+  is bounded only by the token approvals the router (or Permit2) holds. Keep those approvals capped.
+- **Your own accounts.** Calls the agent's Safe or smart account makes are judged one by one, and the account's
+  own admin functions (`enableModule`, `addOwnerWithThreshold`, `swapOwner`, `changeThreshold`, `setGuard`,
+  `setFallbackHandler`, `installModule`, …) are always refused, so the agent can't take over the account.
+  An address can't be in both `accounts` and `destinations`.
 - **Off-chain signatures** (EIP-2612 Permit, Permit2, other EIP-712 messages) are only checked when signed
   through the guarded signer. The proxy never sees them.
 - **Simulation is advisory.** State can change between simulation and inclusion. A clean simulation is not a

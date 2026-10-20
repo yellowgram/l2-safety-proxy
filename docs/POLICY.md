@@ -36,7 +36,7 @@ Anything the policy doesn't allow is refused. An empty policy `{}` refuses every
 | `chains` | any chain | Chain ids this policy may send on. Others → `CHAIN_NOT_ALLOWED` |
 | `window.seconds` | `86400` | Length of the rolling window for `windowMaxWei` and `windowMaxAmountRaw` |
 | `native.maxPerTxWei` | no cap | ETH one transaction may move, summed over every call inside it |
-| `native.windowMaxWei` | no cap | ETH one sender may move per window, across transactions |
+| `native.windowMaxWei` | no cap | ETH one sender may move per window, across transactions and across all chains in the policy (amounts are summed in wei regardless of chain) |
 | `destinations.<address>` | — | A contract or account the agent may call or pay |
 | `…maxNativeWei` | no cap | ETH per call to this destination |
 | `…selectors` | any function | Functions that may be called, as 4-byte selectors or signatures. `"0x"` allows plain ETH transfers |
@@ -52,7 +52,7 @@ Anything the policy doesn't allow is refused. An empty policy `{}` refuses every
 | `delegation.mode` | `deny` | `deny` refuses every EIP-7702 delegation; `allowlist` allows `delegates` |
 | `delegation.delegates` | none | Contracts the account may delegate to |
 | `delegation.allowAnyChain` | `false` | Allow authorizations signed for chain id 0 (valid on every chain) |
-| `accounts` | none | Smart accounts the agent owns (its Safe, its 4337 wallet). Calls they make are checked one by one, and they don't need to be destinations |
+| `accounts` | none | Smart accounts the agent owns (its Safe, its 4337 wallet). Calls they make are checked one by one, they don't need to be destinations, and their admin functions (modules, owners, threshold, guards, fallback handler) are always refused. An address can't be both an account and a destination |
 | `universalRouter.recipients` | none | Extra addresses a swap's output may go to (the sender and the router always may) |
 | `allowContractCreation` | `false` | Allow deploying contracts |
 | `typedData.allowUnknown` | `false` | Let the guarded signer sign EIP-712 messages it can't check |
@@ -65,13 +65,18 @@ Anything the policy doesn't allow is refused. An empty policy `{}` refuses every
 2. The call is flattened. Multicall3 (`aggregate*`, `tryAggregate`, `blockAndAggregate`), `multicall(...)`,
    Safe `execTransaction` and `multiSend`, `execute`/`executeBatch` in their common forms, ERC-7821 / ERC-7579
    `execute(bytes32,bytes)` and Universal Router `execute` are unpacked, up to a nesting limit (`TOO_DEEP`).
-   A wrapper must itself be an allowed destination unless it's the sender or one of `accounts`.
+   A wrapper must itself be an allowed destination unless it's the sender or one of `accounts`, and the
+   destination's own `selectors` and `maxNativeWei` apply to the wrapper call too. Account-style wrappers
+   (`execute`, `executeBatch`) are only unpacked on the sender or one of `accounts`; on any other contract
+   they're an ordinary call to that destination. ERC-7579 modes other than plain call/batch with exec type
+   `00` or `01` and a zero mode selector are refused (`MALFORMED_BATCH`).
 3. Each inner call is judged:
    - a self-call with no data and no value (cancelling a stuck nonce) is allowed;
    - calls to Permit2 use the `approve` rules and the expiry cap; unknown Permit2 functions are refused;
    - token calls (`transfer`, `transferFrom`, `safeTransferFrom`, `safeBatchTransferFrom`, `approve`,
      `increaseAllowance`, `approveAndCall`, `permit`, `setApprovalForAll`) use the `tokens` rules.
-     `decreaseAllowance` and approvals of 0 are always allowed;
+     `decreaseAllowance`, approvals of 0 and `setApprovalForAll(false)` are allowed on any token listed in
+     `tokens` or `destinations` (a "reducing" call to an unknown contract is just an unknown call);
    - anything else must go to a listed destination, within its `selectors` and `maxNativeWei`.
 4. ETH moved across the whole transaction is checked against `maxPerTxWei`, then the rolling caps are reserved.
 
@@ -118,6 +123,11 @@ such as `transferWithAuthorization`. `check-policy` warns about this.
 | `ROUTER_RECIPIENT_NOT_ALLOWED` | Swap output going to someone else |
 | `WINDOW_CAP_EXCEEDED` | Over a rolling cap |
 | `TYPED_DATA_UNKNOWN` | (guarded signer) EIP-712 message it can't check |
+| `TYPED_DATA_AUTHORIZES_TX` | (guarded signer) `SafeTx`, `SafeMessage` or a 4337 user operation: always refused |
+| `MESSAGE_SIGNING_DENIED` | (guarded signer) `signMessage` without a matching `allowMessage` |
+| `ACCOUNT_ADMIN_DENIED` | An admin call (module, owner, threshold, guard, fallback handler) on the sender or one of `accounts` |
+| `REPLAYABLE_TX` | A legacy transaction without a chain id |
+| `INTERNAL_ERROR` | The policy check itself failed unexpectedly; nothing was sent |
 | `IDEMPOTENCY_CONFLICT` | `-32087`: key already sent another transaction |
 | `STORE_DOWN` | `-32087`: the state store failed, so nothing was sent |
 | `CHAIN_READ_FAILED` | `-32087`: the RPC didn't answer the bypass check's nonce read, so nothing was sent |

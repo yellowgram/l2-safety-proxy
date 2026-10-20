@@ -17,6 +17,13 @@ l2-send-guard becomes one policy guard for agent wallets. It absorbs six single-
 - Signing methods (`eth_sign`, `personal_sign`, `eth_signTypedData*`, `wallet_sendCalls`) are refused with
   `-32081` like `eth_sendTransaction`. Unknown submit-like methods (e.g. `eth_sendUserOperation`) are refused
   with `-32083 METHOD_NOT_GATED`.
+- The guarded signer refuses `signMessage` unless you pass `allowMessage`, and always refuses `SafeTx`,
+  `SafeMessage` and ERC-4337 user-operation typed data.
+- An address can't be in both `accounts` and `destinations`. Admin calls on the agent's own accounts
+  (modules, owners, threshold, guards, fallback handler) are refused (`ACCOUNT_ADMIN_DENIED`).
+- Legacy transactions without a chain id are refused (`REPLAYABLE_TX`).
+- Requests with keys that differ only in case are refused (`-32600`), and only `jsonrpc`, `id`, `method` and
+  `params` are forwarded.
 - The `policy:check`, `demo:dual-layer`, `demo:safe-exec` and `demo:offline` scripts are replaced by
   `l2-send-guard check-policy` and `npm run demo`.
 
@@ -51,6 +58,19 @@ l2-send-guard becomes one policy guard for agent wallets. It absorbs six single-
 - `migrate-policy` never widens access: `requireApproval` destinations stay refused, and contract creation
   allowed by one chain overlay isn't carried over to all chains.
 - `unlock` resets the sender's baseline from the chain, so the next send isn't locked again.
+- Only a definite upstream rejection frees a reservation and an idempotency key. A Sync timeout (code 4), a
+  network error or an unrecognised error keeps them. "Nonce too low" no longer erases the nonce's record, so
+  rebroadcasting a mined transaction doesn't lock the sender.
+- A destination's `selectors` and `maxNativeWei` apply when it's called as a wrapper; account-style
+  `execute`/`executeBatch` is only unpacked on the agent's own accounts. Revokes (`approve(…, 0)`,
+  `decreaseAllowance`, `setApprovalForAll(false)`) are only allowed on listed contracts.
+- Rolling ETH caps are per sender across all chains, as documented (they were per chain).
+- `mev_sendBundle` items must have exactly one of `tx` or `hash`.
+- ERC-7579 modes with an unknown exec type or a non-zero mode selector are refused.
+- A 7702 authorization for another chain is refused by the guarded signer.
+- An unexpected error inside the policy check is reported as `INTERNAL_ERROR`, not `STORE_DOWN`.
+- `check-policy` warns about a destination with no `selectors`.
+- The example agent policy no longer lists the agent's Safe as a destination, and narrows the router to `execute`.
 
 ### Removed
 

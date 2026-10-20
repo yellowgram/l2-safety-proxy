@@ -43,6 +43,9 @@ export function summarizePolicy(p: Policy): { summary: string[]; warnings: strin
   const warnings: string[] = [];
   if (p.destinations.size === 0 && p.tokens.size === 0) warnings.push("no destinations or tokens: every send will be denied");
   if (p.native.maxPerTxWei === undefined && p.native.windowMaxWei === undefined) warnings.push("no native caps: allowed destinations can receive any amount");
+  for (const [d, r] of p.destinations) {
+    if (!r.selectors) warnings.push(`destination ${d}: any function may be called on it (set selectors to restrict)`);
+  }
   for (const [t, r] of p.tokens) {
     if (r.transfer.maxAmountRaw === undefined && r.windowMaxAmountRaw === undefined && r.transfer.recipients.size > 0) {
       warnings.push(`token ${t}: transfers have no per-tx or rolling cap`);

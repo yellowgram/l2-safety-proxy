@@ -22,6 +22,9 @@ export type Leaf =
 export interface Wrapper {
   to: Address;
   name: string;
+  /** Native value sent to the wrapper call itself, and its 4-byte selector. */
+  value: bigint;
+  selector: Hex;
   /** "account": runs as the agent (Safe, smart wallet, 7702 self-call). "router": runs as the router. */
   as: "account" | "router";
   path: string;
@@ -84,7 +87,13 @@ function walk(
   const to = call.to;
   const isSelf = lc(to) === lc(ctx.sender);
   const isAccount = isSelf || ctx.accounts.has(lc(to)!);
-  const wrap = (as: Wrapper["as"]) => out.wrappers.push({ to, name: d!.name, as, path });
+  const wrap = (as: Wrapper["as"]) =>
+    out.wrappers.push({ to, name: d!.name, as, path, value: call.value, selector: call.data.slice(0, 10).toLowerCase() as Hex });
+  // Account-style wrappers (execute/executeBatch/7579) only mean "run these calls as the
+  // agent" on the agent's own account. On any other contract they are an ordinary call,
+  // judged by that destination's rule.
+  const accountOnly = d.signature.startsWith("execute(address") || d.signature.startsWith("executeBatch") || d.signature === "execute(bytes32,bytes)" || d.signature === "execute((address,uint256,bytes)[])";
+  if (accountOnly && !isAccount) return leaf();
   const sub = (i: number, c: { to?: Address; value: bigint; data: Hex }, asAccount: boolean) =>
     walk(c, ctx, out, depth + 1, `${path}>${d!.name}[${i}]`, asAccount);
 
@@ -178,7 +187,16 @@ function walk(
     case "execute(bytes32,bytes)": {
       wrap("account");
       const [mode, exec] = d.args as [Hex, Hex];
+      // ERC-7579 mode: callType(1) execType(1) unused(4) modeSelector(4) payload(22).
       const callType = mode.slice(2, 4);
+      const execType = mode.slice(4, 6);
+      const unusedAndSelector = mode.slice(6, 22);
+      if (execType !== "00" && execType !== "01") {
+        throw new DecodeDenied("MALFORMED_BATCH", `ERC-7579 exec type 0x${execType} is not supported`, path);
+      }
+      if (!/^0+$/.test(unusedAndSelector)) {
+        throw new DecodeDenied("MALFORMED_BATCH", "ERC-7579 mode has a mode selector or reserved bytes the guard can't interpret", path);
+      }
       if (callType === "00") {
         if (size(exec) < 52) throw new DecodeDenied("MALFORMED_BATCH", "ERC-7579 single execution too short", path);
         const target = getAddress(sliceHex(exec, 0, 20));

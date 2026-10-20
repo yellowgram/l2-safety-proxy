@@ -1,4 +1,4 @@
-import { zeroAddress, type Address, type Hex } from "viem";
+import { toFunctionSelector, zeroAddress, type Address, type Hex } from "viem";
 import { EFFECTIVELY_UNLIMITED, NonCanonicalAbi, UINT160_MAX, decodeKnown, selectorOf } from "../abi.js";
 import { DecodeDenied, flattenCalls, type Leaf } from "../calls.js";
 import type { Authorization } from "../tx.js";
@@ -31,6 +31,23 @@ class Deny extends Error {
 
 const lc = (a: string) => a.toLowerCase();
 
+/** Safe and ERC-7579 functions that change who controls an account. */
+const ACCOUNT_ADMIN_SELECTORS = new Map<string, string>(
+  [
+    "enableModule(address)",
+    "disableModule(address,address)",
+    "addOwnerWithThreshold(address,uint256)",
+    "removeOwner(address,address,uint256)",
+    "swapOwner(address,address,address)",
+    "changeThreshold(uint256)",
+    "setGuard(address)",
+    "setModuleGuard(address)",
+    "setFallbackHandler(address)",
+    "installModule(uint256,address,bytes)",
+    "uninstallModule(uint256,address,bytes)",
+  ].map((sig) => [toFunctionSelector(`function ${sig}`).toLowerCase(), sig])
+);
+
 /**
  * Judge one transaction against the policy. Pure: no network, no state.
  * Rolling caps are applied separately (see `checkWindow`) using `verdict.spend`.
@@ -59,11 +76,18 @@ function run(policy: Policy, tx: TxInput, opts: EvaluateOptions, spend: Spend) {
   const sender = tx.from ? lc(tx.from) : undefined;
 
   // A wrapper (Multicall3, a router, someone else's Safe) must itself be an allowed
-  // destination unless it is the agent's own account.
+  // destination unless it is the agent's own account, and that destination's own rule
+  // (selectors, maxNativeWei) applies to the wrapper call before its contents are judged.
   for (const w of flat.wrappers) {
     const t = lc(w.to);
     if (t === sender || policy.accounts.has(t)) continue;
-    destination(policy, t, w.path, opts.poisoned);
+    const rule = destination(policy, t, w.path, opts.poisoned);
+    if (rule.selectors && !rule.selectors.has(w.selector)) {
+      throw new Deny("SELECTOR_NOT_ALLOWED", `function ${w.selector} (${w.name}) on ${t} is not in its allowed selectors`, w.path);
+    }
+    if (rule.maxNativeWei !== undefined && w.value > rule.maxNativeWei) {
+      throw new Deny("OVER_CAP", `sends ${w.value} wei to ${t}; its cap is ${rule.maxNativeWei}`, w.path);
+    }
   }
 
   spend.native += tx.value;
@@ -141,6 +165,13 @@ function judgeLeaf(policy: Policy, leaf: Extract<Leaf, { kind: "call" }>, ctx: L
   // Self-call with no data and no value: the standard way to cancel a stuck nonce.
   if (to === ctx.sender && leaf.data === "0x" && leaf.value === 0n) return;
 
+  // The agent's own account changing who controls it (owners, threshold, modules, guards,
+  // fallback handler) is never something a spend policy should allow.
+  const sel0 = (selectorOf(leaf.data) ?? "0x").toLowerCase();
+  if ((to === ctx.sender || policy.accounts.has(to)) && ACCOUNT_ADMIN_SELECTORS.has(sel0)) {
+    throw new Deny("ACCOUNT_ADMIN_DENIED", `${ACCOUNT_ADMIN_SELECTORS.get(sel0)} on the agent's account ${to} changes who controls it and is always denied`, path);
+  }
+
   if (to === ctx.permit2) return judgePermit2(policy, leaf, ctx, spend);
 
   const tok = decode(leaf.data, "token", path);
@@ -174,8 +205,22 @@ function transfer(policy: Policy, token: string, recipient: string, amt: bigint,
   if (recipient !== ctx.sender) add(spend, token, amt);
 }
 
-function approval(policy: Policy, token: string, spender: string, amt: bigint, spend: Spend, path: string, unlimitedAt = EFFECTIVELY_UNLIMITED) {
-  if (amt === 0n) return; // revoking is always allowed
+/**
+ * A call that only reduces a permission (revoke, decreaseAllowance, setApprovalForAll(false))
+ * is allowed without token caps, but only on a contract the policy knows: on an unknown
+ * contract the same selector could be any function.
+ */
+function reducing(policy: Policy, token: string, path: string, poisoned?: Set<string>) {
+  if (policy.tokens.has(token)) return;
+  destination(policy, token, path, poisoned);
+}
+
+function approval(policy: Policy, token: string, spender: string, amt: bigint, spend: Spend, path: string, unlimitedAt = EFFECTIVELY_UNLIMITED, poisoned?: Set<string>) {
+  if (amt === 0n) {
+    // A Permit2 revoke (UINT160 scale) is a call to the pinned Permit2 contract, not to `token`.
+    if (unlimitedAt !== UINT160_MAX) reducing(policy, token, path, poisoned);
+    return;
+  }
   const rule = tokenRule(policy, token, path);
   if (amt >= unlimitedAt) throw new Deny("APPROVAL_UNLIMITED", `unlimited approval of ${token} to ${spender}`, path);
   if (!rule.approve.spenders.has(spender)) throw new Deny("SPENDER_NOT_ALLOWED", `${spender} is not an allowed spender of ${token}`, path);
@@ -216,17 +261,17 @@ function judgeToken(
     case "increaseAllowance(address,uint256)":
     case "increaseApproval(address,uint256)":
     case "approveAndCall(address,uint256,bytes)":
-      return approval(policy, token, lc(a(0)), n(1), spend, path);
+      return approval(policy, token, lc(a(0)), n(1), spend, path, EFFECTIVELY_UNLIMITED, ctx.poisoned);
     case "decreaseAllowance(address,uint256)":
-      return;
+      return reducing(policy, token, path, ctx.poisoned);
     case "permit(address,address,uint256,uint256,uint8,bytes32,bytes32)":
-      return approval(policy, token, lc(a(1)), n(2), spend, path);
+      return approval(policy, token, lc(a(1)), n(2), spend, path, EFFECTIVELY_UNLIMITED, ctx.poisoned);
     case "permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)":
       // DAI-style permit: allowed=true is an unlimited approval.
       if (args[4] === true) throw new Deny("APPROVAL_UNLIMITED", `DAI-style permit grants ${a(1)} unlimited ${token}`, path);
-      return;
+      return reducing(policy, token, path, ctx.poisoned);
     case "setApprovalForAll(address,bool)": {
-      if (args[1] === false) return;
+      if (args[1] === false) return reducing(policy, token, path, ctx.poisoned);
       const rule = tokenRule(policy, token, path);
       if (!rule.approve.operators.has(lc(a(0)))) {
         throw new Deny("OPERATOR_APPROVAL_DENIED", `setApprovalForAll(true) for ${a(0)} on ${token} (operator not listed)`, path);
