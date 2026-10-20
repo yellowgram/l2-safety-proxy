@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Tests: Panic `0x22` (storage encoding error) is in the revert-decode table. Thanks @littfed (#14).
+
 ## 1.0.0
 
 l2-send-guard becomes one policy guard for agent wallets. It absorbs six single-purpose packages
