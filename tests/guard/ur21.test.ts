@@ -343,6 +343,8 @@ describe("2.1 commands outside V4", () => {
     for (const c of ["0x40", "0x44", "0xc4", "0x7f"]) {
       const v = await judge(policy(), { to: UR20, data: plan([[c, SWEEP(WETH, MSG_SENDER)[1]]]) });
       expect(v.code, c).toBe("NON_CANONICAL_ABI");
+      // As in 2.0.0, the path names the command type under the 2.0 mask.
+      expect(v.path).toBe(`tx>execute[0:0x${(parseInt(c, 16) & 0x3f).toString(16).padStart(2, "0")}]`);
       expect(v.reason).toContain("which this router version doesn't use");
     }
   });
@@ -454,6 +456,12 @@ describe("V4_SWAP on 2.1: funds taken into the router or paid from it", () => {
       expect(v.allow, v.reason).toBe(true);
     }
   });
+  it("the open delta is the sum of every exact-in amount in that currency", async () => {
+    const two = (b: bigint) => plan([v4([A.IN_SINGLE(ETH_C, TOKEN, 600n), A.IN(ETH_C, [WETH], b), A.SETTLE(ETH_C, OPEN, true), A.TAKE_ALL(TOKEN), A.TAKE_ALL(WETH)])]);
+    const v = await judge(policy(), { to: UR21, value: 1000n, data: two(400n) });
+    expect(v.allow, v.reason).toBe(true);
+    await stranded({ to: UR21, value: 1000n, data: two(399n) }, "tx>execute");
+  });
   it("ETH left over after the settle is ROUTER_OUTPUT_STRANDED unless swept", async () => {
     const data = (amt: bigint) => plan([v4([A.IN_SINGLE(ETH_C, TOKEN, amt), A.SETTLE(ETH_C, OPEN, true), A.TAKE_ALL(TOKEN)])]);
     await stranded({ to: UR21, value: 1000n, data: data(999n) }, "tx>execute");
@@ -468,6 +476,8 @@ describe("V4_SWAP on 2.1: funds taken into the router or paid from it", () => {
       [A.IN_SINGLE(ETH_C, TOKEN, 1000n), A.IN_SINGLE(TOKEN, ETH_C, 50n), A.SETTLE(ETH_C, OPEN, true), A.TAKE_ALL(TOKEN)],
       // ETH is an intermediate hop of a path.
       [A.IN_SINGLE(ETH_C, TOKEN, 1000n), A.IN(TOKEN, [ETH_C, WETH], 50n), A.SETTLE(ETH_C, OPEN, true), A.TAKE_ALL(TOKEN), A.TAKE_ALL(WETH)],
+      // A multi-hop exact-out swap whose output is ETH.
+      [A.IN_SINGLE(ETH_C, TOKEN, 1000n), A.OUT(ETH_C, [WETH], 1n), A.SETTLE(ETH_C, OPEN, true), A.TAKE_ALL(TOKEN), A.SETTLE_ALL(WETH)],
       // An exact-out swap in ETH: its debt isn't known.
       [A.IN_SINGLE(ETH_C, TOKEN, 1000n), A.OUT_SINGLE(ETH_C, WETH, 1n), A.SETTLE(ETH_C, OPEN, true), A.TAKE_ALL(TOKEN)],
       // A take of ETH out of the pool manager.
