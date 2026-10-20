@@ -271,10 +271,15 @@ close the gap:
   plain transfer and needs no function list; anything with calldata needs one. A plain transfer to a contract
   still runs its `receive`/fallback code (WETH's deposits, for example), so cap it with `maxNativeWei`.
 - **Swaps.** Universal Router commands are checked for recipients: the output must go to the sender, one of
-  `accounts`, a listed recipient, or the router running the command. Each payout is bound to its own router, and
-  `MSG_SENDER` means the router's real caller, so a swap inside Multicall3 can't pay Multicall3 (or another
-  contract in the transaction) where anyone could take it (`ROUTER_PAYOUT_TO_WRAPPER`). Unknown commands are refused. Prices and slippage are not checked, and the amount a swap spends
-  is bounded only by the token approvals the router (or Permit2) holds. Keep those approvals capped.
+  `accounts`, or a listed recipient. Each payout is bound to its own router, and `MSG_SENDER` means the router's
+  real caller, so a swap inside Multicall3 can't pay Multicall3 (or another contract in the transaction)
+  (`ROUTER_PAYOUT_TO_WRAPPER`). The router itself (`ADDRESS_THIS`) is only a step: whatever a plan puts there
+  (a swap's output, wrapped or unwrapped ETH, tokens pulled in with Permit2, ETH sent with the call) must leave
+  again in the same plan, through `SWEEP` or `UNWRAP_WETH` to an allowed payee or a later swap that spends the
+  whole balance; otherwise the plan is refused (`ROUTER_OUTPUT_STRANDED`). Commands flagged "allow revert" don't
+  count as moving funds out. Unknown commands are refused. Within those rules the guard doesn't track amounts:
+  prices and slippage are not checked, and the amount a swap spends is bounded only by the token approvals the
+  router (or Permit2) holds. Keep those approvals capped.
 - **Your own accounts.** Calls the agent's Safe or smart account makes are judged one by one, and the account's
   own admin functions (`enableModule`, `addOwnerWithThreshold`, `swapOwner`, `changeThreshold`, `setGuard`,
   `setFallbackHandler`, `installModule`, …) are always refused, so the agent can't take over the account.
@@ -384,6 +389,9 @@ on it, so allowlisting a DEX router allowed its admin and sweep functions too. I
   in the same transaction (the Multicall3 that called the router, a second router) is refused
   (`ROUTER_PAYOUT_TO_WRAPPER`), and `MSG_SENDER` now means the router's real caller. Inside Multicall3, pay the
   sender's address explicitly. Payouts to your `accounts` are allowed.
+- Funds a Universal Router plan leaves in the router itself (a swap to `ADDRESS_THIS` with nothing sweeping it
+  out) are refused (`ROUTER_OUTPUT_STRANDED`): anyone can take a balance left in the router. End such a plan
+  with `SWEEP` or `UNWRAP_WETH` to `MSG_SENDER`, as Uniswap's own SDK does.
 - `migrate-policy` writes 0.x destinations as `"type": "eoa"`. Replace that with a `selectors` list for any
   contract you call.
 - Library: `selectorWarnings(policy)` returns the warnings for `allowAnySelector` destinations; log them if you

@@ -52,7 +52,24 @@ export interface FlattenContext {
   /** Agent-owned smart accounts (Safe, 4337 wallet), lowercase. */
   accounts: Set<string>;
   permit2: string;
+  /**
+   * The wrapped native token the Universal Router uses on this chain (its WETH9), lowercase.
+   * Lets UNWRAP_WETH settle a swap output that is WETH. Unknown: only SWEEP settles it.
+   */
+  weth?: string;
 }
+
+/** WETH9 as configured in Uniswap's Universal Router deployments, by chain id. */
+export const UR_WETH: Readonly<Record<number, string>> = {
+  1: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+  10: "0x4200000000000000000000000000000000000006",
+  8453: "0x4200000000000000000000000000000000000006",
+  42161: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+  11155111: "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+  11155420: "0x4200000000000000000000000000000000000006",
+  84532: "0x4200000000000000000000000000000000000006",
+  421614: "0x980b62da83eff3d4576c647993b0c1d7faf17c73",
+};
 
 const lc = (a?: string) => a?.toLowerCase();
 
@@ -70,7 +87,8 @@ export function flattenCalls(
 }
 
 function walk(
-  call: { to?: Address; value: bigint; data: Hex },
+  /** msgValue: the msg.value code at `to` sees, when it differs from `value` (delegatecalled multicall entries). */
+  call: { to?: Address; value: bigint; data: Hex; msgValue?: bigint },
   ctx: FlattenContext,
   out: Flattened,
   depth: number,
@@ -104,7 +122,7 @@ function walk(
   if (accountOnly && !isAccount) return leaf();
   // Inner calls of a wrapper are made by the wrapper itself (msg.sender = to), except
   // multicall(bytes[]) entries, which are delegatecalled and keep this call's msg.sender.
-  const sub = (i: number, c: { to?: Address; value: bigint; data: Hex }, asAccount: boolean, innerCaller: Address | undefined = to) =>
+  const sub = (i: number, c: { to?: Address; value: bigint; data: Hex; msgValue?: bigint }, asAccount: boolean, innerCaller: Address | undefined = to) =>
     walk(c, ctx, out, depth + 1, `${path}>${d!.name}[${i}]`, asAccount, innerCaller);
 
   switch (d.signature) {
@@ -138,7 +156,7 @@ function walk(
       // Each entry is delegatecalled on the same contract.
       wrap(isAccount ? "account" : "router");
       const items = d.args[d.args.length - 1] as Hex[];
-      items.forEach((data, i) => sub(i, { to, value: 0n, data }, isAccount, caller));
+      items.forEach((data, i) => sub(i, { to, value: 0n, data, msgValue: call.msgValue ?? call.value }, isAccount, caller));
       return;
     }
     case "execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)": {
@@ -231,7 +249,7 @@ function walk(
     case "execute(bytes,bytes[])":
     case "execute(bytes,bytes[],uint256)": {
       wrap("router");
-      universalRouter(d.args[0] as Hex, d.args[1] as Hex[], to, caller, ctx, out, depth + 1, `${path}>execute`);
+      universalRouter(d.args[0] as Hex, d.args[1] as Hex[], to, caller, ctx, out, depth + 1, `${path}>execute`, call.msgValue ?? call.value);
       return;
     }
   }
@@ -287,46 +305,134 @@ function urDecode(types: string, input: Hex, path: string): readonly unknown[] {
   }
 }
 
+/** Universal Router amount constant: "the router's whole balance of this token" (Constants.CONTRACT_BALANCE). */
+const UR_CONTRACT_BALANCE = 1n << 255n;
+/** Universal Router's name for native ETH in SWEEP and friends (Constants.ETH). */
+const UR_ETH = "0x0000000000000000000000000000000000000000";
+
+/**
+ * Funds the plan puts into the router itself (a swap or transfer to ADDRESS_THIS, WRAP_ETH or
+ * UNWRAP_WETH to ADDRESS_THIS, ETH sent with the call). Anyone can sweep a balance left in the
+ * router, so each one must leave again before the plan ends. Keyed by token address (UR_ETH for
+ * ETH); `amount` is known only for ETH sent with the call.
+ */
+type RouterHeld = Map<string, { what: string; path: string; amount?: bigint }>;
+
 /**
  * `caller` is the router's msg.sender: the sender for a direct call, or the wrapper (Multicall3, the
  * agent's Safe, …) that calls the router. Universal Router's MSG_SENDER recipient means that address.
+ *
+ * Every payout becomes a `payout` leaf for the policy to judge. Funds paid to the router itself are
+ * tracked, and must be moved out by a later command of the same plan: SWEEP of that token, UNWRAP_WETH
+ * for WETH (both pay the router's whole balance), WRAP_ETH for ETH, or an exact-input swap the router
+ * pays for, when its amount is CONTRACT_BALANCE or covers every known amount put there. A command flagged "allow revert", or anything in such a sub-plan, may
+ * silently fail, so it never counts as moving funds out. Whatever is left: ROUTER_OUTPUT_STRANDED.
  */
-function universalRouter(commands: Hex, inputs: Hex[], router: Address, caller: Address | undefined, ctx: FlattenContext, out: Flattened, depth: number, path: string) {
+function universalRouter(
+  commands: Hex,
+  inputs: Hex[],
+  router: Address,
+  caller: Address | undefined,
+  ctx: FlattenContext,
+  out: Flattened,
+  depth: number,
+  path: string,
+  msgValue = 0n,
+  held?: RouterHeld,
+  revertible = false
+) {
   if (depth > MAX_DEPTH) throw new DecodeDenied("TOO_DEEP", `wrappers nested deeper than ${MAX_DEPTH}`, path);
   const n = size(commands);
   if (n !== inputs.length) throw new DecodeDenied("MALFORMED_BATCH", "Universal Router commands/inputs length mismatch", path);
+  const root = held === undefined;
+  const funds: RouterHeld = held ?? new Map();
+  if (root && msgValue > 0n) funds.set(UR_ETH, { what: `${msgValue} wei of ETH sent with the call`, path, amount: msgValue });
+  const weth = ctx.weth ?? "weth";
   const recipient = (r: Address): Address => {
     const l = lc(r);
     if (l === UR_MSG_SENDER) return (caller ?? r) as Address;
     if (l === UR_ADDRESS_THIS) return router;
     return r;
   };
+  const toRouter = (r: Address) => lc(recipient(r)) === lc(router);
   const payout = (r: Address, p: string) => out.leaves.push({ kind: "payout", recipient: recipient(r), router, path: p });
   const permit2Leaf = (data: Hex, p: string) =>
     out.leaves.push({ kind: "call", to: ctx.permit2 as Address, value: 0n, data, path: p, fromAccount: true });
+  const credit = (token: string, what: string, p: string, amount?: bigint) => {
+    const k = lc(token)!;
+    const h = funds.get(k);
+    if (!h) funds.set(k, { what, path: p, amount });
+    else h.amount = h.amount !== undefined && amount !== undefined ? h.amount + amount : undefined;
+  };
+  // The router pays `amount` of `token` out of its own balance. Counts only when it surely empties
+  // what the plan put there: the whole balance (CONTRACT_BALANCE), or at least the known amount.
+  const spend = (token: string, amount: bigint, settles: boolean) => {
+    const k = lc(token)!;
+    const h = funds.get(k);
+    if (!h || !settles) return;
+    if (amount === UR_CONTRACT_BALANCE || (h.amount !== undefined && amount >= h.amount)) funds.delete(k);
+    else if (h.amount !== undefined) h.amount -= amount;
+  };
+  const v3Token = (route: Hex, first: boolean, p: string): string => {
+    if (size(route) < 43) throw new DecodeDenied("NON_CANONICAL_ABI", "Universal Router V3 path is shorter than one pool", p);
+    return lc(first ? sliceHex(route, 0, 20) : sliceHex(route, size(route) - 20))!;
+  };
 
   for (let i = 0; i < n; i++) {
-    const cmd = Number(hexToBigInt(sliceHex(commands, i, i + 1))) & 0x7f;
+    const raw = Number(hexToBigInt(sliceHex(commands, i, i + 1)));
+    const cmd = raw & 0x7f;
     const input = inputs[i]!;
     const p = `${path}[${i}:0x${cmd.toString(16).padStart(2, "0")}]`;
+    // Only a command that can't silently fail may count as moving funds out of the router.
+    const settles = !revertible && (raw & 0x80) === 0;
     switch (cmd) {
       case UR.V3_SWAP_EXACT_IN:
-      case UR.V3_SWAP_EXACT_OUT:
-        payout(urDecode("address, uint256, uint256, bytes, bool", input, p)[0] as Address, p);
+      case UR.V3_SWAP_EXACT_OUT: {
+        const [r, amount, , route, payerIsUser] = urDecode("address, uint256, uint256, bytes, bool", input, p) as [Address, bigint, bigint, Hex, boolean];
+        payout(r, p);
+        // Exact-in paths run input → output; exact-out paths are reversed.
+        const exactIn = cmd === UR.V3_SWAP_EXACT_IN;
+        if (exactIn && !payerIsUser) spend(v3Token(route, true, p), amount, settles);
+        if (toRouter(r)) credit(v3Token(route, !exactIn, p), `the output of swap ${p}`, p);
         break;
+      }
       case UR.V2_SWAP_EXACT_IN:
-      case UR.V2_SWAP_EXACT_OUT:
-        payout(urDecode("address, uint256, uint256, address[], bool", input, p)[0] as Address, p);
+      case UR.V2_SWAP_EXACT_OUT: {
+        const [r, amount, , route, payerIsUser] = urDecode("address, uint256, uint256, address[], bool", input, p) as [Address, bigint, bigint, Address[], boolean];
+        payout(r, p);
+        if (route.length < 2) throw new DecodeDenied("NON_CANONICAL_ABI", "Universal Router V2 path has fewer than two tokens", p);
+        if (cmd === UR.V2_SWAP_EXACT_IN && !payerIsUser) spend(route[0]!, amount, settles);
+        if (toRouter(r)) credit(route[route.length - 1]!, `the output of swap ${p}`, p);
         break;
-      case UR.SWEEP:
+      }
+      case UR.SWEEP: {
+        // SWEEP pays out the router's whole balance of the token. To the router itself it moves nothing.
+        const [token, r] = urDecode("address, address, uint256", input, p) as [Address, Address, bigint];
+        payout(r, p);
+        if (!toRouter(r) && settles) funds.delete(lc(token)!);
+        break;
+      }
       case UR.TRANSFER:
       case UR.PAY_PORTION:
+        // A fixed amount or a share of the balance: never counts as emptying it.
         payout(urDecode("address, address, uint256", input, p)[1] as Address, p);
         break;
-      case UR.WRAP_ETH:
-      case UR.UNWRAP_WETH:
-        payout(urDecode("address, uint256", input, p)[0] as Address, p);
+      case UR.WRAP_ETH: {
+        const [r, amount] = urDecode("address, uint256", input, p) as [Address, bigint];
+        payout(r, p);
+        const known = amount === UR_CONTRACT_BALANCE ? funds.get(UR_ETH)?.amount : amount;
+        spend(UR_ETH, amount, settles);
+        if (toRouter(r)) credit(weth, `WETH from WRAP_ETH at ${p}`, p, known);
         break;
+      }
+      case UR.UNWRAP_WETH: {
+        // Unwraps the router's whole WETH balance and pays the ETH to the recipient.
+        const [r] = urDecode("address, uint256", input, p) as [Address, bigint];
+        payout(r, p);
+        if (settles) funds.delete(weth);
+        if (toRouter(r)) credit(UR_ETH, `ETH from UNWRAP_WETH at ${p}`, p);
+        break;
+      }
       case UR.BALANCE_CHECK_ERC20:
         break;
       case UR.PERMIT2_TRANSFER_FROM: {
@@ -335,6 +441,7 @@ function universalRouter(commands: Hex, inputs: Hex[], router: Address, caller: 
           encodeFunctionData({ abi: PERMIT2_ABI, functionName: "transferFrom", args: [ctx.sender ?? UR_MSG_SENDER, recipient(to), amount, token] }),
           p
         );
+        if (toRouter(to)) credit(token, `tokens pulled into the router at ${p}`, p, amount);
         break;
       }
       case UR.PERMIT2_TRANSFER_FROM_BATCH: {
@@ -349,6 +456,7 @@ function universalRouter(commands: Hex, inputs: Hex[], router: Address, caller: 
           }),
           p
         );
+        for (const x of details) if (toRouter(x.to)) credit(x.token, `tokens pulled into the router at ${p}`, p, x.amount);
         break;
       }
       case UR.PERMIT2_PERMIT: {
@@ -370,8 +478,9 @@ function universalRouter(commands: Hex, inputs: Hex[], router: Address, caller: 
         break;
       }
       case UR.EXECUTE_SUB_PLAN: {
+        // A sub-plan shares the router's balances with the plan that runs it.
         const [subCommands, subInputs] = urDecode("bytes, bytes[]", input, p) as [Hex, Hex[]];
-        universalRouter(subCommands, subInputs, router, caller, ctx, out, depth + 1, `${p}>subplan`);
+        universalRouter(subCommands, subInputs, router, caller, ctx, out, depth + 1, `${p}>subplan`, 0n, funds, !settles);
         break;
       }
       default:
@@ -380,6 +489,18 @@ function universalRouter(commands: Hex, inputs: Hex[], router: Address, caller: 
           `Universal Router command 0x${cmd.toString(16).padStart(2, "0")} can't be checked by the guard`,
           p
         );
+    }
+  }
+
+  if (root) {
+    for (const [token, h] of funds) {
+      const name = token === UR_ETH ? "ETH" : token === weth ? "WETH" : `token ${token}`;
+      throw new DecodeDenied(
+        "ROUTER_OUTPUT_STRANDED",
+        `${h.what} (${name}) is left in router ${router} when the plan ends, and anyone can take a balance left in the router. ` +
+          `End the plan with SWEEP${token === weth ? " or UNWRAP_WETH" : ""} to MSG_SENDER`,
+        h.path
+      );
     }
   }
 }

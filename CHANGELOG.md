@@ -21,12 +21,19 @@ on it, so allowlisting a contract such as a DEX router allowed all of its functi
 - `migrate-policy` writes 0.x destinations as `"type": "eoa"`, with a note to add `selectors` for contracts.
 - `"selectors": "*"` is refused with a pointer to `allowAnySelector`.
 - Universal Router payouts are bound to the router that runs the command. A payout may go to the sender, one of
-  `accounts`, a `universalRouter.recipients` entry, or that router itself (`ADDRESS_THIS`). In 1.x a payout to
+  `accounts`, or a `universalRouter.recipients` entry. In 1.x a payout to
   any other wrapper in the same transaction was accepted, so `Multicall3 → router` could sweep tokens into
   Multicall3, where anyone can take them. That is now refused with the new deny code `ROUTER_PAYOUT_TO_WRAPPER`.
   The router's `MSG_SENDER` recipient now resolves to the router's actual caller (Multicall3, the agent's Safe,
   a MultiSend contract), not always to the transaction's sender; in 1.x `MSG_SENDER` inside `Multicall3 → router`
   was judged as "the sender" while the funds went to Multicall3.
+- Funds a Universal Router plan puts into the router itself must leave it in the same plan. A swap's output
+  sent to `ADDRESS_THIS`, `WRAP_ETH`/`UNWRAP_WETH` to `ADDRESS_THIS`, tokens pulled in with Permit2 and ETH
+  sent with the call have to be moved out by a later `SWEEP` or `UNWRAP_WETH` to an allowed payee, or spent in
+  full by a later swap the router pays for. Otherwise the plan is refused with the new deny code
+  `ROUTER_OUTPUT_STRANDED`: `SWEEP` and `execute` have no caller check, so anyone can take a balance left in
+  the router. A sweep back to `ADDRESS_THIS`, a `TRANSFER` or `PAY_PORTION` of part of the balance, and a
+  command flagged "allow revert" don't count. In 1.x a swap to `ADDRESS_THIS` with nothing after it was allowed.
 - A payout to one of `accounts` is allowed even when that account isn't part of the transaction (in 1.x only
   when it was a wrapper in it).
 
@@ -38,6 +45,7 @@ on it, so allowlisting a contract such as a DEX router allowed all of its functi
 - `"type": "eoa"` per destination (`"contract"` is also accepted and is the default).
 - `selectorWarnings(policy)` in the library, for callers that load policies themselves.
 - A `hint` for `SELECTORS_REQUIRED` in `error.data`.
+- Hints for `ROUTER_PAYOUT_TO_WRAPPER` and `ROUTER_OUTPUT_STRANDED` in `error.data`.
 
 ### Changed
 

@@ -28,6 +28,8 @@ the codes. The usual causes:
 - `TOKEN_NOT_ALLOWED`: token calls are judged under `tokens`, not `destinations`. Add a `tokens` entry.
 - `APPROVAL_OVER_CAP` with "(none set)": `approve.maxAmountRaw` is required for any approval.
 - `CHAIN_NOT_ALLOWED`: the chain id isn't in `chains`.
+- `ROUTER_OUTPUT_STRANDED`: a Universal Router plan sends something to `ADDRESS_THIS` (the router) and never
+  moves it out. End the plan with `SWEEP` (or `UNWRAP_WETH` for WETH) to `MSG_SENDER`.
 
 ## -32082 (simulation couldn't decide)
 

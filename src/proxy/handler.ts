@@ -217,6 +217,7 @@ const HINTS: Record<string, string> = {
   INTERNAL_ERROR: "The guard hit an unexpected error while checking this transaction, so it refused to send. Please report it with the decision log entry.",
   REPLAYABLE_TX: "Sign the transaction with a chain id (EIP-155 or a typed transaction).",
   ROUTER_PAYOUT_TO_WRAPPER: "A swap inside a batch pays another contract in the transaction, where anyone could take the funds. Pay the sender's address explicitly.",
+  ROUTER_OUTPUT_STRANDED: "The swap plan leaves funds in the Universal Router, where anyone could take them. End the plan with SWEEP (or UNWRAP_WETH) to MSG_SENDER.",
   SELECTORS_REQUIRED: 'This destination has no "selectors" list, so no function on it may be called. Add the function to its "selectors" in the policy.',
 };
 

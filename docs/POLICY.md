@@ -62,7 +62,7 @@ every such destination. See [Contract destinations](#contract-destinations).
 | `delegation.delegates` | none | Contracts the account may delegate to |
 | `delegation.allowAnyChain` | `false` | Allow authorizations signed for chain id 0 (valid on every chain) |
 | `accounts` | none | Smart accounts the agent owns (its Safe, its 4337 wallet). Calls they make are checked one by one, they don't need to be destinations, and their admin functions (modules, owners, threshold, guards, fallback handler) are always refused. So is any other function called on the account itself (or on the sender) that is not a wrapper the guard unpacks (`execute`, `executeBatch`, 7579 `execute`, `multicall`), such as `upgradeToAndCall` or `addOwnerAddress`. An address can't be both an account and a destination |
-| `universalRouter.recipients` | none | Extra addresses a swap's output may go to. The sender, one of `accounts`, and the router that runs the command (`ADDRESS_THIS`) always may; any other contract in the same transaction (Multicall3, another router) may not (`ROUTER_PAYOUT_TO_WRAPPER`) unless listed here |
+| `universalRouter.recipients` | none | Extra addresses a swap's output may go to. The sender and one of `accounts` always may; any other contract in the same transaction (Multicall3, another router) may not (`ROUTER_PAYOUT_TO_WRAPPER`) unless listed here. The router that runs the command (`ADDRESS_THIS`) is only an intermediate step: what a plan puts there must leave in the same plan (`ROUTER_OUTPUT_STRANDED`). |
 | `allowContractCreation` | `false` | Allow deploying contracts |
 | `typedData.allowUnknown` | `false` | Let the guarded signer sign EIP-712 messages it can't check |
 | `note` | — | Free text on destinations and tokens, ignored |
@@ -104,8 +104,13 @@ A destination is fail-closed: unless you say otherwise, the agent may not call a
    destination's own function list and `maxNativeWei` apply to the wrapper call too. Account-style wrappers
    (`execute`, `executeBatch`) are only unpacked on the sender or one of `accounts`; on any other contract
    they're an ordinary call to that destination. ERC-7579 modes other than plain call/batch with exec type
-   `00` or `01` and a zero mode selector are refused (`MALFORMED_BATCH`).
+   `00` or `01` and a zero mode selector are refused (`MALFORMED_BATCH`). In a Universal Router plan, every
+   payout's recipient is recorded, and funds the plan puts into the router itself must leave it by the end of
+   that plan (`ROUTER_OUTPUT_STRANDED`). WETH is recognised by the router's own WETH address on the chains the
+   proxy ships templates for; on other chains, `SWEEP` the WETH instead of `UNWRAP_WETH`.
 3. Each inner call is judged:
+   - a Universal Router payout must go to the sender, one of `accounts` or a `universalRouter.recipients` entry
+     (`ADDRESS_THIS` only as an intermediate step, see above);
    - a self-call with no data and no value (cancelling a stuck nonce) is allowed;
    - calls to Permit2 use the `approve` rules and the expiry cap; unknown Permit2 functions are refused;
    - token calls (`transfer`, `transferFrom`, `safeTransferFrom`, `safeBatchTransferFrom`, `approve`,
@@ -161,6 +166,7 @@ such as `transferWithAuthorization`, is allowed. `check-policy` warns about this
 | `ROUTER_COMMAND_UNCHECKED` | A Universal Router command the guard can't check |
 | `ROUTER_RECIPIENT_NOT_ALLOWED` | Swap output going to someone else |
 | `ROUTER_PAYOUT_TO_WRAPPER` | Swap output going to another contract in the same transaction (e.g. the Multicall3 that called the router, directly or through the `MSG_SENDER` constant), where anyone could take it |
+| `ROUTER_OUTPUT_STRANDED` | A Universal Router plan leaves funds in the router itself: a swap, `WRAP_ETH`/`UNWRAP_WETH` or Permit2 pull to `ADDRESS_THIS`, or ETH sent with the call, with no later `SWEEP`/`UNWRAP_WETH` to an allowed payee (or swap spending the whole balance). Anyone can take a balance left in the router. A sweep back to `ADDRESS_THIS`, a partial `TRANSFER`/`PAY_PORTION` and commands flagged "allow revert" don't count |
 | `WINDOW_CAP_EXCEEDED` | Over a rolling cap |
 | `TYPED_DATA_UNKNOWN` | (guarded signer) EIP-712 message it can't check |
 | `TYPED_DATA_AUTHORIZES_TX` | (guarded signer) `SafeTx`, `SafeMessage` or a 4337 user operation: always refused |

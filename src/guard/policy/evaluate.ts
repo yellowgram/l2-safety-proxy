@@ -1,6 +1,6 @@
 import { toFunctionSelector, zeroAddress, type Address, type Hex } from "viem";
 import { EFFECTIVELY_UNLIMITED, NonCanonicalAbi, UINT160_MAX, decodeKnown, selectorOf } from "../abi.js";
-import { DecodeDenied, flattenCalls, type Leaf } from "../calls.js";
+import { DecodeDenied, UR_WETH, flattenCalls, type Leaf } from "../calls.js";
 import type { Authorization } from "../tx.js";
 import { permit2For } from "./load.js";
 import type { DenyCode, DestinationRule, Policy, Spend, TokenRule, Verdict } from "./types.js";
@@ -72,7 +72,7 @@ function run(policy: Policy, tx: TxInput, opts: EvaluateOptions, spend: Spend) {
   checkAuthorizations(policy, tx.authorizationList ?? [], chainId);
 
   const permit2 = permit2For(policy, chainId);
-  const flat = flattenCalls({ to: tx.to, value: tx.value, data: tx.data }, { sender: tx.from, accounts: policy.accounts, permit2 });
+  const flat = flattenCalls({ to: tx.to, value: tx.value, data: tx.data }, { sender: tx.from, accounts: policy.accounts, permit2, weth: UR_WETH[chainId] });
   const sender = tx.from ? lc(tx.from) : undefined;
 
   // A wrapper (Multicall3, a router, someone else's Safe) must itself be an allowed
@@ -87,8 +87,9 @@ function run(policy: Policy, tx: TxInput, opts: EvaluateOptions, spend: Spend) {
   spend.native += tx.value;
   for (const leaf of flat.leaves) {
     if (leaf.kind === "payout") {
-      // A payout may go to the sender, one of the agent's accounts, a listed recipient, or the
-      // router that runs the command (ADDRESS_THIS), and nowhere else. In particular not to another
+      // A payout may go to the sender, one of the agent's accounts, a listed recipient, or, as a
+      // step inside the plan, the router that runs the command (ADDRESS_THIS): flattenCalls already
+      // denied any plan that leaves funds there at its end (ROUTER_OUTPUT_STRANDED). Never to another
       // contract in the same transaction (Multicall3, a second router): anyone can take funds left there.
       const r = lc(leaf.recipient);
       const router = lc(leaf.router);
