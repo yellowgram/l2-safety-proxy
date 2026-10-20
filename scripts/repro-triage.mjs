@@ -17,8 +17,8 @@ export const COMMENT_NEEDS_REPRO = [
   "Reply with all of the following:",
   "- package version or commit SHA (not `@latest`)",
   "- Node version and OS",
-  "- `npm test` output and `npm run demo:dual-layer` output, or why the offline demo failed",
-  "- redacted env booleans only (`GUARD_MODE`, `L2SG_POLICY_ENABLED`, loopback yes/no)",
+  "- `npm test` output and `npm run demo` output, or why the offline demo failed",
+  "- redacted env booleans only (`GUARD_MODE`, policy file set yes/no, loopback yes/no)",
   "",
   "Do not paste keys, RPC URLs, or the allowlist. Template: `.github/ISSUE_TEMPLATE/bug_report.md`. How-to questions belong in Discussions.",
   "",
@@ -29,7 +29,7 @@ export const COMMENT_REPRO_PRESENT = "Offline repro looks present. Removed `need
 
 export const COMMENT_CLOSE = [
   "Closing after 14 days with `needs-repro` still set and no update.",
-  "Re-open with the offline repro from the bug template: package pin, Node, OS, `npm test`, and `npm run demo:dual-layer`.",
+  "Re-open with the offline repro from the bug template: package pin, Node, OS, `npm test`, and `npm run demo`.",
   "A public Sepolia log is not a substitute for that offline repro.",
 ].join(" ");
 
@@ -75,14 +75,14 @@ function hasOs(text) {
 }
 
 function hasOfflineOutput(text) {
-  return /(?:Demo OK|\bPASS\b|\bFAIL\b|-3208[0-4]|policy:check OK|Error:)/.test(text);
+  return /(?:Demo OK|\bPASS\b|\bFAIL\b|-3208[0-8]|Error:)/.test(text);
 }
 
-/** Empty array means the body is enough to debug without a founder ping. */
+/** Empty array means the body is enough to debug without a maintainer follow-up. */
 export function missingReproReasons(body) {
   const text = body || "";
   const reasons = [];
-  if (!/demo:dual-layer/i.test(text)) reasons.push("missing demo:dual-layer");
+  if (!/npm run demo\b/i.test(text)) reasons.push("missing npm run demo");
   if (!/npm test/i.test(text)) reasons.push("missing npm test");
   if (!hasOfflineOutput(text)) {
     reasons.push("missing offline output (PASS, FAIL, Demo OK, an -3208x code, or Error:)");

@@ -4,18 +4,18 @@ body:
     attributes:
       value: |
         Discussions are for how-to. Bugs with an offline repro belong in Issues.
-        Custody, new chains, Safe clones, hosted SaaS, grant writing, and Soft-WTP outreach are out of scope (see SUPPORT.md).
+        Key custody, Safe clones and hosted services are out of scope (see SUPPORT.md).
   - type: textarea
     id: question
     attributes:
       label: Question
-      description: Include your install path (Human/ops or Agent MSP) and GUARD_MODE. Do not paste keys or the allowlist.
+      description: Say whether you run the proxy or the library, and your GUARD_MODE. Do not paste keys or the allowlist.
     validations:
       required: true
   - type: textarea
     id: tried
     attributes:
       label: What you already ran
-      description: "policy:check, demo:dual-layer, or /health booleans — redacted."
+      description: "check-policy output, npm run demo, or /health — redacted."
     validations:
       required: false

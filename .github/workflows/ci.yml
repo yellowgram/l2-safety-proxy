@@ -30,17 +30,32 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: policy:check (example poison + clean fixture)
-        run: npm run policy:check
+      - name: Example policies are valid
+        run: |
+          node dist/index.js check-policy policy.example.json
+          node dist/index.js check-policy policy.agent.example.json
 
-      - name: Offline dual-layer demo
-        run: npm run demo:dual-layer
+      - name: Offline demo
+        run: node scripts/demo.mjs
 
-      - name: Offline Safe execTransaction ExecutionFailure demo
-        run: npm run demo:safe-exec
-
-      - name: Agent halt sample
-        run: node examples/agent-viem-halt.mjs
-
-      - name: Offline Layer 1 abort + fail-open demo
-        run: npm run demo:offline
+  postgres-store:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 2s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Store tests against Postgres
+        run: npx vitest run tests/guard
+        env:
+          DATABASE_URL: postgres://postgres@localhost:5432/postgres

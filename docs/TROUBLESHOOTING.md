@@ -1,62 +1,59 @@
 # Troubleshooting
 
-Short runbook for the failures that are actually Guard's. Walk [TRIAGE.md](./TRIAGE.md) first and stop at the matching step. Nonce, underpriced, and replacement-underpriced are **client or upstream** fee/nonce problems. Guard does not allocate nonces.
+## The proxy won't start
 
-## 1. Upstream RPC flaky or missing `eth_simulateV1`
+It refuses to start rather than run with a weaker setup than you asked for. The message says what to change.
 
-**Symptom:** `decision: fail_open` with `confidence: unknown` or `eth_call`, or strict mode returns `-32082`.
-
-**What happened:** The proxy prefers `eth_simulateV1`, caches a negative result when the upstream rejects it, and falls back to `eth_call`. If both are uncertain and `GUARD_MODE=open`, the raw tx is **forwarded**. That is not a policy decision.
-
-**Check:** `GET /health` for `guardMode`. Set a per-chain `L2SG_RPC_FALLBACK_<CHAIN>` used only for simulation. Sends still forward to `L2SG_RPC_<CHAIN>`.
-
-Public testnet RPC weather is your upstream, not a Guard bug. CI does not call public Sepolia.
-
-## 2. Layer 2 looks off
-
-**Symptom:** spends you expected to stop are forwarded; `GET /health` shows `policy.enabled: false`.
-
-**What happened:** Layer 2 defaults **off** (Human/ops path). A missing file does **not** silently disable an enabled policy — the process refuses to start. If the process is up and `policy.enabled` is false, the flag or file said off.
-
-**Check:** `policy.enabled`, `destinationCount` (count only, not the list), `notifyConfigured`. Agent path needs `L2SG_POLICY_ENABLED=true` and `L2SG_POLICY_FILE` pointing at a file that passed `npm run policy:check -- ./policy.json`.
-
-## 3. Chain header vs signed chainId
-
-**Symptom:** `-32084` `decision: chain_mismatch`, or a send landed on the wrong upstream before you upgraded.
-
-**What happened:** `x-l2sg-chain` (name or numeric id) selects the chain. If the signed tx has a `chainId` and it disagrees, the proxy stops. It does not simulate and does not forward. Legacy txs with no `chainId` are not compared.
-
-**Check:** the header, the wallet's chain, and `error.data.chainId` vs `error.data.signedChainId`. Fix the header or re-sign. Do not retry the same raw against the other chain.
-
-## 4. Policy JSON invalid
-
-**Symptom:** process exits at start, or `npm run policy:check -- ./policy.json` exits 1.
-
-**What happened:** Policy files are JSON. Comments (`//`) are invalid. Placeholder addresses `0x1111…` / `0x2222…` (any repeated non-zero nibble) fail `policy:check` and, when policy is enabled, refuse start. `allowAnyDestination: true` fails `policy:check` when the file has `enabled: true`, and process start refuses it whenever the merged config is enabled (file, chain overlay, or `L2SG_POLICY_ALLOW_ANY`). `policy:check` reads the file only. Env overrides are applied at start.
-
-**Check:** `npm run policy:check -- ./policy.json` until it prints `policy:check OK`. Then start the process. A file that passes with `enabled: false` can still be refused if `L2SG_POLICY_ENABLED=true` turns on `allowAnyDestination` or leaves a placeholder in the merged allowlist.
-
-## 5. Policy on, raw tx does not parse
-
-**Symptom:** `-32083` with `policyCode: TX_UNPARSEABLE`.
-
-**What happened:** Layer 2 cannot evaluate a transaction it cannot parse, so it does not fall through to simulation or fail-open. The code stays `-32083` so an agent halt on policy deny also stops this case. Policy off does not use this path.
-
-**Check:** the client sent `eth_sendRawTransaction` with a signed raw tx. Do not retry the same bytes.
-
-## 6. `GUARD_MODE` vs `L2SG_FAIL_OPEN`
-
-**Symptom:** uncertain sims abort, or the opposite of what you set.
-
-**What happened:** `GUARD_MODE=open|strict` wins. `L2SG_GUARD_MODE` is an alias. `L2SG_FAIL_OPEN` applies only when `GUARD_MODE` is unset (`false` → strict). The alias stays through 0.6.0.
-
-Layer 2 denials are `-32083` in both modes. `GUARD_MODE` does not fail-open a policy deny.
-
-## Not a Guard bug
-
-| Symptom | Owner |
+| Message mentions | Fix |
 | --- | --- |
-| nonce too low / too high, replacement underpriced, intrinsic gas | The signing client and the upstream |
-| Faucet or balance | Your burner |
-| Key management | Your signer. Guard returns `-32081` for `eth_sendTransaction` |
-| Approve / Permit2 / multicall drain of an allowlisted router | Your tool inventory. See [RESIDUAL_BYPASSES.md](./RESIDUAL_BYPASSES.md) |
+| `no policy` | Set `L2SG_POLICY_FILE=./policy.json`, or `L2SG_POLICY=off` for simulation only |
+| `is a 0.x policy file` | `npx l2-send-guard migrate-policy old.json > policy.json`, then review it |
+| `L2SG_POLICY_ENABLED` or another `L2SG_POLICY_*` | Removed in 1.0: move the rules into the policy file |
+| `unknown chain` | Check the spelling in `L2SG_CHAINS` (`arb-sepolia`, `op-sepolia`, `base-sepolia`, `ethereum`, `arbitrum`, `optimism`, `base`, `sepolia`) |
+| `no public default RPC` | Mainnets need `L2SG_RPC_<NAME>`, e.g. `L2SG_RPC_BASE` |
+| `store … is in use by process` | Another proxy uses the same state file. Use one file per process, or Postgres for several |
+| `journal line is not JSON` | The state file is corrupt beyond its last line. Move it aside to start fresh (rolling caps and keys reset) |
+| `PostgresStore needs the "pg" package` | `npm i pg` |
+
+## Every send is refused with -32083
+
+Read `error.data.policyCode` and `error.data.path`. `path` shows where in the transaction the rule fired,
+e.g. `tx>aggregate3[1]` is the second call inside a Multicall3. [POLICY.md](./POLICY.md#deny-codes) lists
+the codes. The usual causes:
+
+- `DESTINATION_NOT_ALLOWED` for a contract you call through: the wrapper (Multicall3, a router) must be a destination too.
+- `TOKEN_NOT_ALLOWED`: token calls are judged under `tokens`, not `destinations`. Add a `tokens` entry.
+- `APPROVAL_OVER_CAP` with "(none set)": `approve.maxAmountRaw` is required for any approval.
+- `CHAIN_NOT_ALLOWED`: the chain id isn't in `chains`.
+
+## -32082 (simulation couldn't decide)
+
+The upstream RPC doesn't support `eth_simulateV1`, and `eth_call` didn't give a clear answer (or, for a 7702
+transaction, the RPC ignores state overrides, so the delegated code can't be simulated). Use an RPC that
+supports `eth_simulateV1`, set a `L2SG_RPC_FALLBACK_<NAME>` that does, or accept the risk with `GUARD_MODE=open`.
+
+## -32084 (chain mismatch)
+
+The transaction was signed for a different chain than the one the proxy selected. Send the `x-l2sg-chain`
+header (a name from `L2SG_CHAINS` or a numeric chain id), or set `L2SG_DEFAULT_CHAIN`.
+
+## -32087
+
+- `IDEMPOTENCY_CONFLICT`: the key already sent a different transaction. `error.data.priorTxHash` is that
+  transaction. Don't send again under a new key unless you're sure the first one won't land; to replace it,
+  re-sign with the same nonce.
+- `STORE_DOWN`: the state store failed. Nothing was sent. Check the disk or the database.
+- `CHAIN_READ_FAILED`: the upstream RPC didn't answer `eth_getTransactionCount`, which the bypass check needs.
+  Nothing was sent. Retry, or fix the RPC. (`L2SG_BYPASS=off` skips the check.)
+
+## -32088 (sender locked)
+
+A transaction from this sender reached the chain without the guard (or the receive watch saw an approval the
+policy would refuse). Find out what sent it: another process with the key, a wallet app, a leaked key. When
+you've dealt with it, run `l2-send-guard unlock <address> --chain <id>` (stop the proxy first if you use the
+file store). If something else legitimately shares the key, set `L2SG_BYPASS=alert` instead.
+
+## Not a guard problem
+
+`nonce too low`, `replacement transaction underpriced` and `insufficient funds` come from your upstream RPC and
+are passed through unchanged.

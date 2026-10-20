@@ -12,11 +12,11 @@ labels: good first issue, help wanted
 
 **Acceptance**
 - [ ] `npm test` passes
-- [ ] `npm run policy:check` and `npm run demo:dual-layer` pass if behavior or the demo changed
+- [ ] `npm run demo` passes if behavior or the demo changed
 - [ ] Docs updated if behavior changes
 - [ ] No secrets committed
 
 **Pointers**
-- Offline transcript: `docs/fixtures/dual-layer.expected.txt`
-- Decision table: `docs/AGENT_DECISION_TABLE.md`
-- Architecture: `ARCHITECTURE.md`
+- How it works: README, "How it works"
+- Policy reference: `docs/POLICY.md`
+- Engine: `src/guard/` (policy, call flattening, stores); proxy: `src/proxy/`

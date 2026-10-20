@@ -1,21 +1,53 @@
 {
-  "enabled": true,
-  "allowContractCreation": false,
-  "allowAnyDestination": false,
-  "globalMaxNativeWei": "50000000000000000",
+  "chains": [
+    84532
+  ],
+  "window": {
+    "seconds": 3600
+  },
+  "native": {
+    "maxPerTxWei": "10000000000000000",
+    "windowMaxWei": "50000000000000000"
+  },
+  "accounts": [
+    "0x5555555555555555555555555555555555555555"
+  ],
   "destinations": {
-    "0x1111111111111111111111111111111111111111": {
-      "maxNativeWei": "25000000000000000"
+    "0x5555555555555555555555555555555555555555": {
+      "note": "the agent's Safe; calls inside execTransaction are checked one by one"
     },
-    "0x2222222222222222222222222222222222222222": {
-      "maxNativeWei": "10000000000000000",
-      "requireApproval": true
+    "0xcA11bde05977b3631167028862bE2a173976CA11": {
+      "note": "Multicall3; each inner call is checked"
+    },
+    "0x6666666666666666666666666666666666666666": {
+      "note": "the one DEX router this agent may use"
     }
   },
-  "erc20RecipientCheck": true,
-  "humanGate": {
-    "mode": "stop",
-    "notifyUrl": "http://127.0.0.1:9999/policy-denied"
+  "tokens": {
+    "0x036CbD53842c5426634e7929541eC2318f3dCF7e": {
+      "transfer": {
+        "recipients": [
+          "0x1111111111111111111111111111111111111111"
+        ],
+        "maxAmountRaw": "50000000"
+      },
+      "approve": {
+        "spenders": [
+          "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+          "0x6666666666666666666666666666666666666666"
+        ],
+        "maxAmountRaw": "100000000"
+      },
+      "windowMaxAmountRaw": "200000000"
+    }
   },
-  "_comment": "POISON TEMPLATE. Copy to policy.json and replace 0x1111…/0x2222… before use. npm run policy:check -- policy.json must pass. Enabling this file unchanged refuses process start. Policy ON is not a safe agent — docs/RESIDUAL_BYPASSES.md."
+  "permit2": {
+    "maxExpirySeconds": 3600
+  },
+  "delegation": {
+    "mode": "allowlist",
+    "delegates": [
+      "0x7777777777777777777777777777777777777777"
+    ]
+  }
 }

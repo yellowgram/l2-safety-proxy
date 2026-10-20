@@ -12,15 +12,15 @@ Issues without the repro block are labeled `needs-repro` and closed after 14 day
 - Node version:
 - OS:
 
-**Install path**
-- [ ] Human/ops (Layer 2 off)
-- [ ] Agent MSP (Layer 2 on)
+**Setup**
+- [ ] Proxy (`l2-send-guard serve`)
+- [ ] Library (`createGuardedSigner` / `Guard`)
 
 **Offline repro** (required)
 
 ```text
 npm test:
-npm run demo:dual-layer:
+npm run demo:
 ```
 
 If the offline demo cannot run, say why. Do not substitute a public Sepolia log as the only repro.
@@ -29,13 +29,14 @@ If the offline demo cannot run, say why. Do not substitute a public Sepolia log 
 
 ```text
 GUARD_MODE=
-L2SG_POLICY_ENABLED=
+policy file set (yes/no, or L2SG_POLICY=off)=
+L2SG_STORE kind (file/postgres/memory)=
 L2SG_HOST_IS_LOOPBACK=
 ```
 
 **Expected**
 
-**Actual** (include JSON-RPC `error.code` and `error.data.decision` / `layer` / `policyCode` when present)
+**Actual** (include JSON-RPC `error.code` and `error.data.decision` / `policyCode` / `path` when present)
 
 **Safety**
 - Do not paste private keys, mnemonics, or funded raw transactions.

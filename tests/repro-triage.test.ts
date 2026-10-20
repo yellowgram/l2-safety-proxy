@@ -19,7 +19,7 @@ const EMPTY_TEMPLATE = `
 
 \`\`\`text
 npm test:
-npm run demo:dual-layer:
+npm run demo:
 \`\`\`
 `;
 
@@ -30,7 +30,7 @@ const FILLED = `
 
 \`\`\`text
 npm test: 120 passed
-npm run demo:dual-layer: Demo OK
+npm run demo: Demo OK
 -32080 definite-revert abort: PASS
 \`\`\`
 `;
@@ -51,7 +51,7 @@ describe("repro triage", () => {
     expect(reasons).toContain("missing package pin or commit SHA");
     expect(reasons).toContain("missing Node version");
     expect(reasons).toContain("missing OS");
-    expect(reasons).not.toContain("missing demo:dual-layer");
+    expect(reasons).not.toContain("missing npm run demo");
     expect(reasons).not.toContain("missing npm test");
   });
 
@@ -63,7 +63,7 @@ describe("repro triage", () => {
     const body = [
       "commit abcdef1 on Node v22.14.0, Ubuntu.",
       "npm test passed.",
-      "npm run demo:dual-layer printed Demo OK and -32083.",
+      "npm run demo printed Demo OK and -32083.",
     ].join("\n");
     expect(missingReproReasons(body)).toEqual([]);
   });

@@ -1,19 +1,39 @@
 {
-  "enabled": true,
-  "allowContractCreation": false,
-  "allowAnyDestination": false,
-  "globalMaxNativeWei": "100000000000000000",
+  "chains": [
+    84532
+  ],
+  "window": {
+    "seconds": 86400
+  },
+  "native": {
+    "maxPerTxWei": "50000000000000000",
+    "windowMaxWei": "200000000000000000"
+  },
   "destinations": {
     "0x1111111111111111111111111111111111111111": {
-      "maxNativeWei": "50000000000000000"
-    },
-    "0x2222222222222222222222222222222222222222": {
-      "requireApproval": true
+      "note": "payroll wallet",
+      "maxNativeWei": "50000000000000000",
+      "selectors": [
+        "0x"
+      ]
     }
   },
-  "erc20RecipientCheck": true,
-  "humanGate": {
-    "mode": "stop",
-    "notifyUrl": null
+  "tokens": {
+    "0x036CbD53842c5426634e7929541eC2318f3dCF7e": {
+      "transfer": {
+        "recipients": [
+          "0x1111111111111111111111111111111111111111"
+        ],
+        "maxAmountRaw": "250000000"
+      },
+      "approve": {
+        "spenders": [],
+        "maxAmountRaw": "0"
+      },
+      "windowMaxAmountRaw": "1000000000"
+    }
+  },
+  "delegation": {
+    "mode": "deny"
   }
 }

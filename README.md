@@ -1,170 +1,341 @@
-# L2 Send Guard
-
-More from yellowgram: [OSS tools](https://www.yellowgram.dev/oss).
+# l2-send-guard
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![GitHub](https://img.shields.io/badge/GitHub-public-brightgreen)](https://github.com/yellowgram/l2-safety-proxy)
 
-**Multi-L2 pre-broadcast safety middleware** for agent wallets. It simulates `eth_sendRawTransaction` and aborts definite reverts. An optional **thin Layer 2** policy (allowlist + native caps) can stop a send before simulation. Signing stays outside the proxy.
+A policy guard for wallets that software controls: AI agents, bots, payout jobs.
+Every signed EVM transaction is checked against a policy file you write, then simulated, before
+your RPC sees it. It never holds keys.
 
-Public: `git clone https://github.com/yellowgram/l2-safety-proxy.git`
+What it checks, in one pass:
 
-There is no single “fail closed out of the box” mode. Pick a path below. Layer 1 `open` forwards uncertain simulations. Layer 2 off means there is no spend fence.
+- **Where money goes.** An allowlist of destinations, with per-transaction and rolling (per-window) caps
+  on ETH and on each token. ERC-20 `transfer`/`transferFrom` calldata is decoded, so a token transfer to
+  a stranger is caught even though the transaction's `to` is the token contract.
+- **What gets approved.** `approve`, `increaseAllowance`, `setApprovalForAll`, EIP-2612 `permit` and
+  every Permit2 entry point, with a spender allowlist, an amount cap and a Permit2 expiry cap.
+  "Unlimited" means any amount ≥ 2^128, not just `2^256-1`.
+- **What's hidden inside batches.** Multicall3, `multicall`, Safe `execTransaction` and `multiSend`,
+  smart-account `execute`/`executeBatch`, ERC-7821 / EIP-7702 batch `execute`, and Uniswap Universal Router
+  are unpacked and every inner call is judged by the same rules. Delegatecall is refused, except a Safe's
+  call to MultiSend, whose entries are each checked.
+- **EIP-7702 delegation.** A type-4 transaction's `authorizationList` is checked: delegating the account is
+  refused unless the delegate is on your list, and an authorization valid on every chain (`chainId 0`) is
+  refused unless you allow it. Simulation runs with the delegation applied.
+- **Retries.** An `Idempotency-Key` makes "send invoice 1009" happen once, across retries, restarts and
+  re-signed transactions.
+- **Every way to submit.** `eth_sendRawTransaction`, `…Sync`, `…Conditional`, `eth_sendPrivateRawTransaction`,
+  `eth_sendPrivateTransaction` and bundles (`eth_sendBundle`, `mev_sendBundle`) are all checked. Unknown
+  submit-like methods and anything that asks the node to sign (`eth_sendTransaction`, `eth_sign`, …) are refused.
+- **What arrives.** Optionally, inbound transfers and on-chain approvals are watched. A sender that imitates
+  one of your addresses (address poisoning) is blocked as a destination from then on.
 
-> **Support:** bugs with an offline repro go to Issues. How-to goes to Discussions. Paid wire-up is not a checkout — [SUPPORT.md](./SUPPORT.md).  
-> **Offline proof:** [`docs/fixtures/dual-layer.expected.txt`](./docs/fixtures/dual-layer.expected.txt) · [`docs/INBOUND_DEMO.md`](./docs/INBOUND_DEMO.md)
+It runs as a JSON-RPC proxy in front of your RPC (no code changes: point your client at it), or as a
+library around your signer.
 
-## Supported surface (this release)
+## Quickstart (five minutes)
 
-| | |
+You need Node 20 or later.
+
+**1. See it work, offline.** No keys, no network, no funds:
+
+```bash
+git clone https://github.com/yellowgram/l2-safety-proxy.git && cd l2-safety-proxy
+npm ci && npm run demo
+```
+
+```
+1. 0.05 ETH to an allowed payee                  forwarded, hash 0xabababab…
+2. 0.05 ETH to an address not in the policy      -32083 DESTINATION_NOT_ALLOWED — 0x2222… is not an allowed destination (at tx)
+3. unlimited approve hidden inside Multicall3    -32083 APPROVAL_UNLIMITED — unlimited approval of 0x3333… to 0x2222… (at tx>aggregate3[0])
+4. a call that would revert                      -32080 DEFINITE_REVERT — Not enough balance
+5. EIP-7702: delegate this account to a stranger -32083 AUTHORIZATION_DENIED — … which is not an allowed delegate (at authorizationList[0])
+6a. pay invoice 1009 (Idempotency-Key)           forwarded, hash 0xabababab…
+6b. agent retries with a fresh nonce             -32087 IDEMPOTENCY_CONFLICT — idempotency key already used for 0xb135… That transaction was sent; don't send a second one under this key.
+```
+
+**2. Write your policy.** Start from [`policy.example.json`](./policy.example.json) and put in your own
+addresses. Amounts are decimal strings in raw units (wei, or the token's smallest unit). This one lets the
+agent pay one address up to 0.05 ETH at a time and 0.2 ETH a day, and send it up to 250 USDC at a time and
+1,000 a day. Everything else is refused.
+
+```json
+{
+  "chains": [84532],
+  "window": { "seconds": 86400 },
+  "native": { "maxPerTxWei": "50000000000000000", "windowMaxWei": "200000000000000000" },
+  "destinations": {
+    "0xYourPayee…": { "maxNativeWei": "50000000000000000" }
+  },
+  "tokens": {
+    "0x036CbD53842c5426634e7929541eC2318f3dCF7e": {
+      "transfer": { "recipients": ["0xYourPayee…"], "maxAmountRaw": "250000000" },
+      "windowMaxAmountRaw": "1000000000"
+    }
+  }
+}
+```
+
+```bash
+npx l2-send-guard check-policy ./policy.json
+```
+
+Every key is in [docs/POLICY.md](./docs/POLICY.md).
+
+**3. Run the proxy.**
+
+```bash
+npm install l2-send-guard
+L2SG_POLICY_FILE=./policy.json L2SG_CHAINS=base-sepolia npx l2-send-guard
+# [l2-send-guard] listening on http://127.0.0.1:8545
+```
+
+**4. Point your client at it.** Sign as you do today; send through the proxy.
+
+```ts
+import { createWalletClient, http } from "viem";
+import { baseSepolia } from "viem/chains";
+
+const wallet = createWalletClient({ account, chain: baseSepolia, transport: http("http://127.0.0.1:8545") });
+await wallet.sendTransaction({ to: payee, value: 10n ** 15n }); // checked, simulated, then forwarded
+```
+
+For a send that must happen once, use an idempotency key:
+
+```ts
+import { sendRawTransaction } from "l2-send-guard/sdk";
+
+const raw = await account.signTransaction(request);
+const hash = await sendRawTransaction({ proxyUrl: "http://127.0.0.1:8545", raw, idempotencyKey: "invoice-1009" });
+```
+
+Errors come back as JSON-RPC errors with a stable `error.data` (see [Errors](#errors)). An agent should stop
+on `-32083`, `-32087` and `-32088` and not rebroadcast after `-32080`.
+
+## How it works
+
+For each signed transaction, in order:
+
+1. **Parse and recover.** Decode the raw transaction, recover the sender and every 7702 authority.
+   Unparseable or unrecoverable → refused.
+2. **Chain.** The signed `chainId` must match the chain you selected (`x-l2sg-chain` header or the default).
+3. **Bypass lock.** If this sender is locked (see [Threat model](#threat-model-and-limits)), refuse.
+4. **Idempotency.** With a key: the same transaction again returns the first result; a different transaction
+   under a key that already sent is refused.
+5. **Policy.** Flatten batches into leaf calls and judge each one: destination, selector, token transfer,
+   approval, Permit2, NFT approval, 7702 authorization, contract creation. One failing leaf refuses the whole
+   transaction, and the error names where it is (`tx>execTransaction>multiSend[2]`).
+6. **Rolling caps.** Reserve this transaction's spend against the window in the state store. Over the cap → refused.
+7. **Simulation.** `eth_simulateV1` (with 7702 code overrides), falling back to `eth_call`. A definite revert is
+   refused. If simulation can't decide, `GUARD_MODE=strict` (the default) refuses and `open` forwards.
+   Bundles skip this step: the builder simulates them.
+8. **Forward and settle.** Send upstream. A definite upstream rejection releases the reserved spend and the
+   key; anything else keeps them.
+
+Nothing is forwarded unless every step passes. A deny is never "fail-open".
+
+## Library use
+
+The proxy can only judge what's sent through it. If your agent holds the key itself, it can send through any
+RPC. The binding way to use the guard is to give the agent a **guarded signer** instead of the key:
+
+```ts
+import { Guard, FileStore, loadPolicyFile, createGuardedSigner } from "l2-send-guard";
+import { privateKeyToAccount } from "viem/accounts";
+
+const guard = new Guard({ policy: loadPolicyFile("./policy.json"), store: new FileStore("./guard-state.jsonl") });
+const account = createGuardedSigner(privateKeyToAccount(process.env.KEY as `0x${string}`), guard, { chainId: 84532 });
+// account.signTransaction refuses anything the policy refuses (throws GuardDenied).
+// Typed data is checked too: EIP-2612 Permit and Permit2 messages against the approve rules;
+// any other typed data is refused unless the policy sets typedData.allowUnknown.
+```
+
+Keep the key in a different process (or a KMS / enclave) from the agent's tools, and hand the agent only
+this account. Signatures count against the rolling caps, so an agent can't stockpile small signatures and
+send them later.
+
+Lower-level pieces are exported too: `guard.check(raw, { chainId, idempotencyKey })` / `guard.settle(...)`,
+`evaluateTx`, `flattenCalls`, `parseSignedTx`, and the stores (`MemoryStore`, `FileStore`, `PostgresStore`).
+`check(raw)` from `l2-send-guard/agent` is a dry run that reserves nothing.
+
+## Idempotency
+
+Send `Idempotency-Key: <your id>` with the request (or pass `idempotencyKey` to `sendRawTransaction`).
+
+| Situation | Result |
 | --- | --- |
-| **Chains** | `arb-sepolia`, `op-sepolia`, `base-sepolia` only. **Testnet only.** No mainnet SLA. |
-| **Is** | A JSON-RPC proxy in front of your existing RPC |
-| **Submit** | Signed `eth_sendRawTransaction` (and Sync). `eth_sendTransaction` is refused (`-32081`) |
-| **Layer 1** | Sim → abort definite revert (`-32080`) or forward. Uncertain + `GUARD_MODE=strict` → `-32082`. Safe-shaped `execTransaction`: abort on simulated `ExecutionFailure`; outer success without log/trace → uncertain ([docs/SAFE_EXEC_DRIFT.md](./docs/SAFE_EXEC_DRIFT.md)) |
-| **Layer 2** | Optional allowlist + native caps. Deny → `-32083` `policy_denied` (never fail-open). Default **off** |
-| **Chain check** | Signed `chainId` ≠ selected chain → `-32084` `chain_mismatch` (not forwarded) |
+| First send under the key | Checked and forwarded normally |
+| Same signed transaction again | The first hash is returned; nothing is sent twice |
+| Different transaction, same key, earlier one sent or still pending | `-32087`, with the earlier hash in `error.data.priorTxHash` |
+| Re-signed with the **same nonce** (e.g. a gas bump) | Allowed: only one of them can land |
+| The earlier transaction was dropped and its nonce used by something else | The key is free again |
+| The upstream definitely rejected the earlier one | The key is free again |
 
-**Not in this product:** key custody, Safe-enterprise / Zodiac / ERC-7579 policy engines, approval unwinding, hosted SaaS, a managed RPC, MEV protection. Gate-2 **does** abort Safe-shaped `execTransaction` inner failures at send time (not a Protocol Kit replacement). Those enterprise requests are Discussions or a paid SKU, not unlimited Issue debugging. See [SUPPORT.md](./SUPPORT.md) and [docs/SAFE_EXEC_DRIFT.md](./docs/SAFE_EXEC_DRIFT.md).
+Keys are kept for `L2SG_IDEMPOTENCY_TTL_SECONDS` (default 24 hours) after they settle. A key whose transaction
+is still in flight never expires silently: the guard asks the chain what happened before it reuses it. For
+bundles, the key applies per transaction as `key#0`, `key#1`, ….
 
-## Pin
+## Receive-side watch
 
-Install the exact version. Do not use `@latest`.
+Set `L2SG_WATCH_AGENTS=0xYourAgent,…` and the proxy also polls each configured chain for:
 
-```bash
-npm install l2-send-guard@0.5.0
-```
+- **Inbound token transfers.** Each is labeled `clear`, `quarantine` (a token not in your policy, or a sender
+  outside `L2SG_WATCH_EXPECTED_SENDERS`) or `toxic` (dust, or a sender whose address shares the first and last
+  four hex characters with one of your addresses). A toxic sender is added to the poisoned set, and the policy
+  refuses it as a destination (`POISONED_ADDRESS`) even if someone later pastes it into the allowlist.
+- **Approvals granted by the agent** (`Approval`, `ApprovalForAll`, Permit2 `Approval`/`Permit`) that the
+  policy would not allow. These lock the sender like a bypass, and the finding includes unsigned revoke
+  calldata (`approve(spender, 0)`, `setApprovalForAll(op, false)`, Permit2 `lockdown`). The guard never signs it.
 
-The CLI is `l2-send-guard` (`npx l2-send-guard`). Imports are `l2-send-guard`, `l2-send-guard/sdk`, and `l2-send-guard/agent`.
+Anything not `clear` is logged as a `RECEIVE:` line and POSTed to `L2SG_ALERT_WEBHOOK`. The watch waits two
+blocks for reorgs and keeps its cursor in the state store, so a restart resumes where it stopped. Library users
+call `watchInbound(...)` or `scanOnce(...)`.
 
-Offline tests and `demo:dual-layer` run from the git tree (the npm package is the runtime, not the test suite):
+Tokens that aren't in your policy can't be moved anyway, because they aren't allowed destinations. That is the
+"sweep brake": quarantined funds stay put until you add the token to the policy on purpose.
 
-```bash
-git clone https://github.com/yellowgram/l2-safety-proxy.git
-cd l2-safety-proxy
-git checkout <commit>   # the commit published as l2-send-guard@0.5.0
-npm ci && npm test && npm run build
-```
+## Errors
 
-There is no tagged binary. A Docker image digest is not published here. Compose is below for people who build the image themselves. Upgrade notes: [CHANGELOG.md](./CHANGELOG.md).
+| Code | `error.data.decision` | Meaning | Agent should |
+| --- | --- | --- | --- |
+| -32080 | `abort` | Simulation says it would revert. Not sent | Not rebroadcast the same transaction |
+| -32081 | `unsigned_refused` | A method that asks the node to sign (`eth_sendTransaction`, `eth_sign`, …). The guard never holds keys | Sign locally and use `eth_sendRawTransaction` |
+| -32082 | `abort` | Simulation couldn't decide and `GUARD_MODE=strict` | Retry later, or fix the RPC |
+| -32083 | `policy_denied` | The policy refused it. `data.policyCode` says why, `data.path` says where | Stop. Change the policy if it should be allowed |
+| -32084 | `chain_mismatch` | Signed for a different chain than the one selected | Fix the chain |
+| -32087 | `idempotency_conflict` | The key already sent another transaction (`data.priorTxHash`), or the guard's state is unavailable: store down (`STORE_DOWN`) or the RPC couldn't be read for the bypass check (`CHAIN_READ_FAILED`). Nothing was sent | On a conflict, stop: don't send a second payment. On `STORE_DOWN` / `CHAIN_READ_FAILED`, retry later |
+| -32088 | `bypass_locked` | This sender is locked after a transaction landed without the guard | Stop and alert a human |
 
-## Two install paths
+Every error carries `data.l2SendGuard: true`, `decision`, `policyCode`, `reason`, `hint` and, where it applies,
+`path`, `priorTxHash` and `index` (the transaction's position in a bundle). The SDK has
+`classifyGuardError(err)` and `isPolicyDeniedError(err)`-style helpers. The full list of `policyCode` values is
+in [docs/POLICY.md](./docs/POLICY.md#deny-codes).
 
-### Human / ops (simulation first)
+## Threat model and limits
 
-Layer 2 **off**. Layer 1 `GUARD_MODE=open` (uncertain sims forward). This matches a middleware that must not brick good sends when simulation is flaky.
+**Who it protects against.** Software that has authority to send but shouldn't be fully trusted: an agent that
+can be prompt-injected, a bot with a bug, a compromised dependency in the process that builds transactions. The
+policy bounds what such software can do with the wallet.
 
-```bash
-cp .env.example .env
-# leave L2SG_POLICY_ENABLED unset or false
-npm ci && npm test && npm run build && npm start
-# http://127.0.0.1:8545
-```
+**The key holder can go around the proxy.** If the process that holds the private key is the one you don't
+trust, it can sign a transaction and send it through any other RPC. A proxy can't prevent that. Two things
+close the gap:
 
-### Agent MSP (policy is the spend fence)
+1. **Prevention: the guarded signer.** Give the agent `createGuardedSigner(...)` and keep the raw key in a
+   separate process, KMS or enclave. Then nothing the policy refuses gets signed at all, whichever RPC the agent
+   uses. This is the only configuration in which the policy is binding.
+2. **Detection: the bypass lock.** On every send, the proxy compares the sender's on-chain nonce with the nonces
+   it forwarded. If a transaction it never saw has landed, it logs `BYPASS`, POSTs `bypass_detected` to
+   `L2SG_ALERT_WEBHOOK`, and (with `L2SG_BYPASS=lock`, the default) refuses that sender with `-32088` until you
+   run `l2-send-guard unlock <address> --chain <id>`. Detection happens on the next send or watch round, after
+   the bypassing transaction has already landed.
 
-Layer 2 **on**, with your allowlist. Copy `policy.agent.example.json`, **replace** the `0x1111…` / `0x2222…` placeholders, then:
+**Other limits, stated plainly:**
 
-```bash
-npm run policy:check -- ./policy.json
-# must print policy:check OK — the example file itself is poison and must fail a strict check
-L2SG_POLICY_ENABLED=true L2SG_POLICY_FILE=./policy.json npm start
-```
+- **Calls it can't see into.** It decodes the wrappers listed above. A call to an allowlisted contract with
+  calldata it doesn't decode is judged only by that destination's rule (and its `selectors` list, if you set
+  one). Allowlisting a general-purpose router or a smart account you don't control lets it do whatever that
+  contract does. Use `selectors` to narrow it.
+- **Swaps.** Universal Router commands are checked for recipients (the output must go to the sender or a listed
+  recipient); unknown commands are refused. Prices and slippage are not checked.
+- **Off-chain signatures** (EIP-2612 Permit, Permit2, other EIP-712 messages) are only checked when signed
+  through the guarded signer. The proxy never sees them.
+- **Simulation is advisory.** State can change between simulation and inclusion. A clean simulation is not a
+  guarantee, and `GUARD_MODE=open` forwards when simulation can't decide.
+- **One policy per process.** To give two agents different policies, run two proxies (or two `Guard`s).
+- **State.** Rolling caps, idempotency and the bypass lock need the state store. The default file store is for
+  one process on one machine (it takes a lock file). For several processes, use Postgres. If the store fails,
+  sends are refused (`STORE_DOWN`), not let through. `memory` forgets everything on restart.
+- **Network exposure.** The proxy has no authentication. It listens on `127.0.0.1` by default; on `0.0.0.0`
+  anyone who can reach it can broadcast through your RPC (it warns when you do this).
+- **Chains.** Built-in names: `arb-sepolia`, `op-sepolia`, `base-sepolia` (public RPC defaults), and
+  `ethereum`, `arbitrum`, `optimism`, `base`, `sepolia` (you must set `L2SG_RPC_<NAME>`). Any EVM chain works
+  through the library. Mainnet use is at your own risk; there is no warranty (MIT).
+- **Account abstraction.** ERC-4337 UserOperations (`eth_sendUserOperation`) are refused, not checked.
 
-If policy is enabled and the file is missing, invalid, or still full of placeholders, the process **refuses to start**. It will not silently run with policy off. The same refusal happens when the merged config sets `allowAnyDestination` (file, a chain overlay, or `L2SG_POLICY_ALLOW_ANY`). `npm run policy:check` reads the file only; start is what applies the env overrides.
+## Configuration
 
-`GUARD_MODE` is a separate choice:
-
-| Mode | Uncertain simulation | Risk |
+| Variable | Default | Meaning |
 | --- | --- | --- |
-| `open` (default) | forward (`fail_open`) | A bad agent can still broadcast when sim is unsure |
-| `strict` | abort (`-32082`) | Good sends can brick when the upstream sim is flaky |
+| `L2SG_POLICY_FILE` | — (required) | Path to the policy file |
+| `L2SG_POLICY` | — | `off` runs simulation only, with no policy (prints a warning) |
+| `L2SG_CHAINS` | `arb-sepolia,op-sepolia,base-sepolia` | Chains to serve. An unknown name, or a mainnet with no RPC, is an error |
+| `L2SG_DEFAULT_CHAIN` | first in the list | Chain used when the request has no `x-l2sg-chain` header |
+| `L2SG_RPC_<NAME>` | public testnet RPC | Upstream RPC, e.g. `L2SG_RPC_BASE`, `L2SG_RPC_ARB_SEPOLIA` |
+| `L2SG_RPC_FALLBACK_<NAME>` | — | Second RPC used only for simulation |
+| `GUARD_MODE` | `strict` | `strict` refuses when simulation can't decide; `open` forwards |
+| `L2SG_STORE` | `file:./l2-send-guard-state.jsonl` | `file:<path>`, `postgres://…` (needs `npm i pg`), or `memory` |
+| `L2SG_IDEMPOTENCY_TTL_SECONDS` | `86400` | How long settled keys are kept |
+| `L2SG_BYPASS` | `lock` | `lock`, `alert` (log and webhook only) or `off` |
+| `L2SG_ALERT_WEBHOOK` | — | URL that receives `bypass_detected` and `receive_finding` POSTs |
+| `L2SG_WATCH_AGENTS` | — | Addresses to watch for inbound funds and approvals |
+| `L2SG_WATCH_EXPECTED_SENDERS` | — | Senders you expect money from; others are quarantined |
+| `L2SG_WATCH_DUST_RAW` | `0` | Inbound amounts at or below this are dust |
+| `L2SG_WATCH_INTERVAL_SECONDS` | `15` | Poll interval |
+| `L2SG_DECISION_LOG` | — | Append one JSON line per decision to this file |
+| `L2SG_HOST` / `L2SG_PORT` | `127.0.0.1` / `8545` | Listen address |
 
-**Policy ON is not a safe agent.** Allowlisting a router, Permit2, or multicall still moves value. Read [docs/RESIDUAL_BYPASSES.md](./docs/RESIDUAL_BYPASSES.md) before the first agent send. Decision table: [docs/AGENT_DECISION_TABLE.md](./docs/AGENT_DECISION_TABLE.md). Operator pack (pre-install, change protocol, triage, rollback — you fill the blanks): [docs/OPERATOR.md](./docs/OPERATOR.md).
+Configuration errors stop the process at startup with a message; the proxy never runs with a policy silently off.
+`GET /health` reports the version, chains, mode, store kind and policy counts (never addresses).
 
-`L2SG_HOST` defaults to `127.0.0.1`. Binding `0.0.0.0` without an ACL turns the proxy into an unauthenticated raw-tx forwarder onto your upstream RPC. The process warns when it binds a wildcard.
+Commands:
 
-## Error codes
-
-| Code | `decision` | Meaning |
-| --- | --- | --- |
-| **-32080** | `abort` | Layer 1: definite revert. Not forwarded. Do not rebroadcast the same raw |
-| **-32081** | `unsigned_refused` | `eth_sendTransaction` refused. No key custody |
-| **-32082** | `abort` | Layer 1: uncertain sim and `GUARD_MODE=strict` |
-| **-32083** | `policy_denied` | Layer 2: destination, cap, or `TX_UNPARSEABLE` (raw tx did not parse). Not forwarded. Non-retryable halt |
-| **-32084** | `chain_mismatch` | Signed `chainId` ≠ selected chain. Not a policy deny and not a sim result |
-
-**Simulation is not policy.** `-32080` means the tx would revert. `-32083` means the allowlist or cap said no — the tx might have succeeded on chain. Do not “fix” a policy deny by turning Layer 2 off.
-
-Stable `error.data` fields: `decision`, `certainty`, `confidence`, `chainId`, `layer` (`1`, `2`, or `null`), `policyCode` (string on `-32083`, otherwise `null`).
-
-Order inside a send: unsigned refuse → if policy is on and the raw tx does not parse, `-32083` `TX_UNPARSEABLE` → chain mismatch (`-32084`; legacy txs with no `chainId` are not compared) → Layer 2 policy (stop, no sim) → Layer 1 sim (abort or forward).
-
-## Prove it offline
-
-No keys, no capital, no public RPC. The demo exits non-zero if stdout drifts from the fixture.
-
-```bash
-npm ci
-npm test
-npm run build
-npm run policy:check          # self-test: examples are poison, clean fixture passes
-npm run demo:dual-layer       # diff vs docs/fixtures/dual-layer.expected.txt
-node examples/agent-viem-halt.mjs
 ```
-
-`/health` reports `guardMode`, `policy.enabled`, `policy.destinationCount` (not the addresses), and `policy.notifyConfigured` (`true`/`false`).
-
-Troubleshooting: [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md). Decision log schema: [docs/DECISION_LOG.md](./docs/DECISION_LOG.md).
+l2-send-guard [serve]                          start the proxy
+l2-send-guard check-policy <file>              validate a policy and print a summary and warnings
+l2-send-guard migrate-policy <0.x-file>        print the 1.0 form of a 0.x policy file
+l2-send-guard unlock <address> --chain <id>    clear a bypass lock (stop the proxy first if you use the file store)
+```
 
 ## Docker
 
-Build locally. Publish **localhost** on the host. The process inside the container binds `0.0.0.0` so Docker can proxy the port, and it prints the wildcard warning.
-
 ```bash
+cp policy.example.json policy.json   # then edit it
 docker compose up --build
-# host: http://127.0.0.1:8545/health
+curl http://127.0.0.1:8545/health
 ```
 
-The compose file mounts `policy.agent.example.json` read-only at `/policy/policy.json` and leaves Layer 2 off. Enable Layer 2 only after you replace placeholders and `policy:check` passes. Do not publish `0.0.0.0:8545:8545`.
+The compose file publishes the port on `127.0.0.1` only and keeps state in a volume.
 
-## Agent transport
+## Migrating
 
-Point HTTP at the proxy. The halt sample never calls `eth_sendTransaction`:
+### From l2-send-guard 0.x
 
-```bash
-npm run build   # the sample imports dist/; without a build it exits and says so
-node examples/agent-viem-halt.mjs
-```
+1.0 replaces the 0.x policy with the format above. The process refuses to start with a 0.x file or the old
+variables, and says what to do.
 
-```ts
-import { http } from "viem";
-import { viemHttpArgs, isPolicyDeniedError } from "l2-send-guard/sdk";
+- Convert your file: `npx l2-send-guard migrate-policy old-policy.json > policy.json`. It prints notes for
+  anything it can't carry over. It never widens access: `requireApproval` destinations are left out (so still
+  refused), and contract creation allowed by only one chain overlay is not carried over.
+- `L2SG_POLICY_ENABLED`, `L2SG_POLICY_ALLOWLIST`, `L2SG_POLICY_GLOBAL_MAX_WEI` and the other `L2SG_POLICY_*`
+  variables are gone. Put the rules in the file and set `L2SG_POLICY_FILE`.
+- A policy is now required. `L2SG_POLICY=off` keeps the 0.x "simulation only" behaviour.
+- `GUARD_MODE` now defaults to `strict`. Set `GUARD_MODE=open` for the old behaviour.
+- New error codes `-32087` and `-32088`. `-32080` to `-32084` keep their meanings.
+- More methods are checked or refused (private and conditional sends, bundles, signing methods).
 
-const transport = http(
-  ...viemHttpArgs({ proxyUrl: "http://127.0.0.1:8545", chain: "base-sepolia" })
-);
-```
+### From the single-purpose packages
 
-`-32083` → stop the loop. `-32080` → do not send that raw again. Table: [docs/AGENT_DECISION_TABLE.md](./docs/AGENT_DECISION_TABLE.md). Wiring notes: [`examples/agentkit-viem.ts`](./examples/agentkit-viem.ts), [`src/sdk/README.md`](./src/sdk/README.md).
+These six packages are merged into l2-send-guard 1.x. Their final 0.2.0 versions behave like 0.1.0 and print a
+deprecation warning.
 
-## GUARD_MODE
+| Old package | In l2-send-guard 1.x | Old error | New error |
+| --- | --- | --- | --- |
+| `send-allow` | `destinations`, `native.maxPerTxWei`, `native.windowMaxWei` | -32083 | -32083 |
+| `send-approve-bound` | `tokens.<token>.approve` (`spenders`, `maxAmountRaw`, `operators`) | -32085 | -32083 (`APPROVAL_*`, `SPENDER_NOT_ALLOWED`) |
+| `send-permit2-bound` | the same `approve` rules, applied to Permit2, plus `permit2.maxExpirySeconds` | -32086 | -32083 (`PERMIT2_*`, `APPROVAL_*`) |
+| `send-idempotency` | `Idempotency-Key` header, or `guard.check(raw, { idempotencyKey })` | -32087 | -32087 |
+| `recv-sweep-brake` | `L2SG_WATCH_AGENTS`; quarantined tokens stay unspendable because they aren't in the policy; `maySpend()` for asset-keyed callers | — | -32083 `POISONED_ADDRESS` |
+| `recv-approval-watch` | `L2SG_WATCH_AGENTS` (approval findings with revoke calldata) | — | -32088 after an unexpected approval |
 
-| Mode | Env | Uncertain / missing sim |
-| --- | --- | --- |
-| **open** (default) | `GUARD_MODE=open` | **fail_open** — forward upstream |
-| **strict** | `GUARD_MODE=strict` | **abort** (`-32082`) |
+Each was one slice of the same job and shared the same blind spots: no decoding inside batches, no 7702
+checks, per-transaction limits only, other submit methods unchecked, and in-memory state.
 
-Alias: `L2SG_GUARD_MODE`. Legacy `L2SG_FAIL_OPEN` applies only when `GUARD_MODE` is unset, and stays through 0.6.0. It does not affect `-32083`.
+## Contributing and support
 
-## Other checks
-
-Read-only Reth gas-cap probe (no keys, no broadcast): `RETH_BIN=$(which reth) npm run probe:gascap`. Notes: [docs/drafts/27342-design.md](./docs/drafts/27342-design.md).
+Bugs with a way to reproduce them offline go to [Issues](https://github.com/yellowgram/l2-safety-proxy/issues);
+questions to [Discussions](https://github.com/yellowgram/l2-safety-proxy/discussions). Security reports: see
+[SECURITY.md](./SECURITY.md). [CHANGELOG](./CHANGELOG.md) · [Troubleshooting](./docs/TROUBLESHOOTING.md).
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
-
----
-
-Part of yellowgram open source tools: https://www.yellowgram.dev/oss
+MIT. See [LICENSE](./LICENSE).

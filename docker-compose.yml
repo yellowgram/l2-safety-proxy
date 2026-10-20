@@ -1,16 +1,9 @@
-# Human/ops default: Layer 2 OFF, host publish is localhost only.
+# The process binds 0.0.0.0 inside the container so Docker can reach it.
+# The host publish below is 127.0.0.1 only. Don't change it to "8545:8545":
+# that exposes an unauthenticated raw-transaction forwarder.
 #
-# The process binds 0.0.0.0 *inside* the container so Docker's port proxy can
-# reach it. That is not a public bind on the host. Do not change the publish
-# line to "8545:8545" — that exposes an unauthenticated raw-tx forwarder.
-#
-# Agent MSP: replace placeholders in a copy of the policy file, run
-# `npm run policy:check -- ./policy.json`, then set:
-#   L2SG_POLICY_ENABLED: "true"
-#   L2SG_POLICY_FILE: /policy/policy.json
-# The example mounted below is poison and the process will refuse to start
-# if you enable it unchanged. restart: unless-stopped will keep retrying that
-# exit. `docker compose stop` is how you halt the loop while you fix the file.
+# Put your policy in ./policy.json (start from policy.example.json) and check it:
+#   npx l2-send-guard check-policy ./policy.json
 services:
   l2-send-guard:
     build: .
@@ -20,23 +13,18 @@ services:
     environment:
       L2SG_HOST: "0.0.0.0"
       L2SG_PORT: "8545"
-      GUARD_MODE: "open"
-      L2SG_POLICY_ENABLED: "false"
+      GUARD_MODE: "strict"
       L2SG_CHAINS: "arb-sepolia,op-sepolia,base-sepolia"
       L2SG_DEFAULT_CHAIN: "arb-sepolia"
-      # L2SG_RPC_ARB_SEPOLIA: https://sepolia-rollup.arbitrum.io/rpc
-      # L2SG_RPC_BASE_SEPOLIA: https://sepolia.base.org
-      # L2SG_RPC_OP_SEPOLIA: https://sepolia.optimism.io
+      L2SG_POLICY_FILE: /config/policy.json
+      L2SG_STORE: file:/state/l2-send-guard-state.jsonl
     volumes:
-      - ./policy.agent.example.json:/policy/policy.json:ro
+      - ./policy.json:/config/policy.json:ro
+      - l2sg-state:/state
     healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:8545/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
-        ]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8545/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 3
+volumes:
+  l2sg-state:

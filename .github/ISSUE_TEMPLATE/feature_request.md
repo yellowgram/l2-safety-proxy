@@ -1,22 +1,18 @@
 ---
 name: Feature request
-about: A change inside the current testnet proxy — not a new product
+about: A change to the guard, the proxy or the policy format
 title: "[feat] "
 labels: enhancement
 ---
 
-Out of scope (custody, new chains, Safe / ERC-7579, hosted SaaS, grant writing, Soft-WTP outreach) is not a feature request. Maintainers will reply with the out-of-scope note in SUPPORT.md and close it.
-
-**Problem**
+**Problem** (what transaction or workflow does the guard get wrong or not cover?)
 
 **Proposal**
 
-**Out of scope check**
-- [ ] Not key custody or `eth_sendTransaction` signing
-- [ ] Not a new chain or mainnet SLA
-- [ ] Not Safe / Zodiac / ERC-7579 or approval unwinding
-- [ ] Not hosted SaaS
-- [ ] Not grant writing or outreach
+**Out of scope**
+- [ ] Not key custody or signing for you (`eth_sendTransaction`)
+- [ ] Not a hosted service
+- [ ] Not a smart-account module (Safe / Zodiac / ERC-7579)
 
 **Acceptance**
-- [ ] `npm test`, `npm run policy:check`, and `npm run demo:dual-layer` still pass offline
+- [ ] `npm test` and `npm run demo` still pass offline

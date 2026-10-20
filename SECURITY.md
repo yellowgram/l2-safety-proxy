@@ -1,15 +1,25 @@
 # Security
 
-L2 Send Guard is a local JSON-RPC proxy for **testnet** sends (Arbitrum Sepolia, OP Sepolia, Base Sepolia). It does not custody keys. It is not a mainnet SLA, a hosted service, or a Safe.
-
 ## Reporting a vulnerability
 
-Do not open a public GitHub Issue for a vulnerability, and do not paste a funded raw transaction or a private key.
+Please report privately through a
+[GitHub Security Advisory](https://github.com/yellowgram/l2-safety-proxy/security/advisories/new). Don't open a
+public issue, and don't include private keys or funded raw transactions. Include the version or commit, the
+impact, and a repro that doesn't need a mainnet key. There is no bug bounty.
 
-This repository does not publish a security email. Report privately with a [GitHub Security Advisory](https://github.com/yellowgram/l2-safety-proxy/security/advisories/new) on `yellowgram/l2-safety-proxy`.
+A policy bypass counts as a vulnerability: any signed transaction that moves value, grants an approval or
+delegates the account in a way the policy should refuse, but is forwarded (or signed by the guarded signer).
 
-Include the package version or commit, impact, and a repro that does not require a mainnet key. There is no bug-bounty program in this repo.
+## What the guard does and doesn't protect against
 
-## Bind
+See [README: Threat model and limits](./README.md#threat-model-and-limits). In short: the proxy bounds what
+untrusted software can send through it, and detects (then locks) sends that went around it. Only the guarded
+signer, with the key held outside the agent's process, prevents a key holder from going around the policy.
 
-The default listen address is `127.0.0.1`. Binding `0.0.0.0` without an ACL makes the proxy an unauthenticated forwarder onto your upstream RPC. The process prints a warning when it binds a wildcard address.
+## Deployment
+
+- The proxy has no authentication. It listens on `127.0.0.1` by default. On `0.0.0.0` without a firewall or
+  ACL, anyone who can reach it can broadcast through your upstream RPC. It warns when bound to a wildcard address.
+- The state file holds idempotency keys, sent nonces and rolling-cap reservations, not secrets. It is created
+  with mode `0600`.
+- `/health` reports counts and settings, never policy addresses.
