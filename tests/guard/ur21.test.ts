@@ -496,6 +496,10 @@ describe("V4_SWAP on 2.1: funds taken into the router or paid from it", () => {
     // WETH from a V3 swap into the router, then a V4 swap the user pays for: the WETH is still there.
     await stranded({ to: UR21, data: plan([V3_IN6(ADDRESS_THIS), v4([A.IN_SINGLE(WETH, TOKEN, 5n), A.SETTLE(WETH, OPEN, true), A.TAKE_ALL(TOKEN)])]) }, "tx>execute[0:0x00]");
     await stranded({ to: UR21, data: plan([V3_IN6(ADDRESS_THIS), v4([A.IN_SINGLE(WETH, TOKEN, 5n), A.SETTLE_ALL(WETH), A.TAKE_ALL(TOKEN)])]) }, "tx>execute[0:0x00]");
+    // The same with a known amount in the router: the user pays the swap, so the 9 WETH stay there.
+    for (const settle of [A.SETTLE(WETH, OPEN, true), A.SETTLE(WETH, 9n, true), A.SETTLE_ALL(WETH)]) {
+      await stranded({ to: UR21, data: plan([v4([A.TAKE(WETH, ADDRESS_THIS, 9n)]), v4([A.IN_SINGLE(WETH, TOKEN, 9n), settle, A.TAKE_ALL(TOKEN)])]) }, "tx>execute[0:0x10]>v4[0:0x0e]");
+    }
   });
   it("router-paid settles of an ERC-20 held in an unknown amount: only CONTRACT_BALANCE empties it", async () => {
     const ok = plan([V3_IN6(ADDRESS_THIS), v4([A.IN_SINGLE(WETH, TOKEN, OPEN), A.SETTLE(WETH, CONTRACT_BALANCE, false), A.TAKE_ALL(TOKEN)])]);
