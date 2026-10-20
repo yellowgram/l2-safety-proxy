@@ -25,6 +25,7 @@ import {
 import { decodeRevertData } from "../decode/revert.js";
 import { classifyUpstream, type Check } from "../guard/guard.js";
 import { forwardRaw } from "../sim/rpcClient.js";
+import { canonicalParams, hasNonAsciiKeys, isCanonicalizedMethod } from "./canonical.js";
 import { simulateRawTransaction } from "../sim/simulator.js";
 import { parseRawTransaction } from "../sim/txParse.js";
 import { recordDecision } from "./counters.js";
@@ -366,7 +367,18 @@ export async function handleRequest(
   if (incoming.params !== undefined && !Array.isArray(incoming.params) && (typeof incoming.params !== "object" || incoming.params === null)) {
     return { jsonrpc: "2.0", id, error: { code: -32600, message: "invalid request: params must be an array or object" } };
   }
-  const req: JsonRpcRequest = { jsonrpc: "2.0", id, method: incoming.method, ...(incoming.params !== undefined ? { params: incoming.params } : {}) } as JsonRpcRequest;
+  if (incoming.params !== undefined && hasNonAsciiKeys(incoming.params)) {
+    return { jsonrpc: "2.0", id, error: { code: -32600, message: "invalid request: object keys must be ASCII, because upstream nodes fold some other characters onto letters" } };
+  }
+  // Gated methods: params rebuilt from an exact-key allowlist (see canonical.ts), so the
+  // nested objects forwarded hold only what the guard read. Unknown keys are refused.
+  let params: unknown = incoming.params;
+  if (isCanonicalizedMethod(incoming.method)) {
+    const c = canonicalParams(incoming.method, incoming.params);
+    if ("error" in c) return { jsonrpc: "2.0", id, error: { code: -32602, message: `invalid params: ${c.error}` } };
+    params = c.params;
+  }
+  const req: JsonRpcRequest = { jsonrpc: "2.0", id, method: incoming.method, ...(params !== undefined ? { params } : {}) } as JsonRpcRequest;
 
   const simulate = deps.simulate ?? simulateRawTransaction;
   const forward =

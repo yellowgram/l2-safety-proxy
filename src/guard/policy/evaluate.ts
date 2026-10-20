@@ -177,7 +177,11 @@ function judgeLeaf(policy: Policy, leaf: Extract<Leaf, { kind: "call" }>, ctx: L
   const tok = decode(leaf.data, "token", path);
   if (tok) return judgeToken(policy, to, tok.name, tok.signature, tok.args, leaf, ctx, spend);
 
-  const rule = destination(policy, to, path, ctx.poisoned);
+  withinDestination(destination(policy, to, path, ctx.poisoned), to, leaf, path);
+}
+
+/** A listed destination's own limits: its selectors (if set) and its maxNativeWei. */
+function withinDestination(rule: ReturnType<typeof destination>, to: string, leaf: { data: Hex; value: bigint }, path: string) {
   const sel = selectorOf(leaf.data) ?? "0x";
   if (rule.selectors && !rule.selectors.has(sel)) {
     throw new Deny("SELECTOR_NOT_ALLOWED", `function ${sel} on ${to} is not in its allowed selectors`, path);
@@ -210,15 +214,17 @@ function transfer(policy: Policy, token: string, recipient: string, amt: bigint,
  * is allowed without token caps, but only on a contract the policy knows: on an unknown
  * contract the same selector could be any function.
  */
-function reducing(policy: Policy, token: string, path: string, poisoned?: Set<string>) {
+function reducing(policy: Policy, token: string, path: string, poisoned: Set<string> | undefined, leaf: { data: Hex; value: bigint }) {
   if (policy.tokens.has(token)) return;
-  destination(policy, token, path, poisoned);
+  // Not a listed token, so it is a listed destination, and that destination's own selectors
+  // and maxNativeWei still apply (value can reach a contract through its fallback).
+  withinDestination(destination(policy, token, path, poisoned), token, leaf, path);
 }
 
-function approval(policy: Policy, token: string, spender: string, amt: bigint, spend: Spend, path: string, unlimitedAt = EFFECTIVELY_UNLIMITED, poisoned?: Set<string>) {
+function approval(policy: Policy, token: string, spender: string, amt: bigint, spend: Spend, path: string, unlimitedAt = EFFECTIVELY_UNLIMITED, poisoned?: Set<string>, leaf?: { data: Hex; value: bigint }) {
   if (amt === 0n) {
     // A Permit2 revoke (UINT160 scale) is a call to the pinned Permit2 contract, not to `token`.
-    if (unlimitedAt !== UINT160_MAX) reducing(policy, token, path, poisoned);
+    if (unlimitedAt !== UINT160_MAX) reducing(policy, token, path, poisoned, leaf ?? { data: "0x", value: 0n });
     return;
   }
   const rule = tokenRule(policy, token, path);
@@ -261,17 +267,17 @@ function judgeToken(
     case "increaseAllowance(address,uint256)":
     case "increaseApproval(address,uint256)":
     case "approveAndCall(address,uint256,bytes)":
-      return approval(policy, token, lc(a(0)), n(1), spend, path, EFFECTIVELY_UNLIMITED, ctx.poisoned);
+      return approval(policy, token, lc(a(0)), n(1), spend, path, EFFECTIVELY_UNLIMITED, ctx.poisoned, leaf);
     case "decreaseAllowance(address,uint256)":
-      return reducing(policy, token, path, ctx.poisoned);
+      return reducing(policy, token, path, ctx.poisoned, leaf);
     case "permit(address,address,uint256,uint256,uint8,bytes32,bytes32)":
-      return approval(policy, token, lc(a(1)), n(2), spend, path, EFFECTIVELY_UNLIMITED, ctx.poisoned);
+      return approval(policy, token, lc(a(1)), n(2), spend, path, EFFECTIVELY_UNLIMITED, ctx.poisoned, leaf);
     case "permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)":
       // DAI-style permit: allowed=true is an unlimited approval.
       if (args[4] === true) throw new Deny("APPROVAL_UNLIMITED", `DAI-style permit grants ${a(1)} unlimited ${token}`, path);
-      return reducing(policy, token, path, ctx.poisoned);
+      return reducing(policy, token, path, ctx.poisoned, leaf);
     case "setApprovalForAll(address,bool)": {
-      if (args[1] === false) return reducing(policy, token, path, ctx.poisoned);
+      if (args[1] === false) return reducing(policy, token, path, ctx.poisoned, leaf);
       const rule = tokenRule(policy, token, path);
       if (!rule.approve.operators.has(lc(a(0)))) {
         throw new Deny("OPERATOR_APPROVAL_DENIED", `setApprovalForAll(true) for ${a(0)} on ${token} (operator not listed)`, path);

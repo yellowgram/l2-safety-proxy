@@ -115,10 +115,15 @@ on `-32083`, `-32087` and `-32088` and not rebroadcast after `-32080`.
 
 For each signed transaction, in order:
 
-0. **Rebuild the request.** Only `jsonrpc`, `id`, `method` and `params` are kept, and that rebuilt request is
-   what gets forwarded. A request with two keys that differ only in case anywhere inside it (`params` and
-   `Params`, `tx` and `Tx`) is refused: some nodes read keys case-insensitively, so the node could act on a
-   different value from the one the guard judged.
+0. **Rebuild the request.** Only `jsonrpc`, `id`, `method` and `params` are kept. For the send methods the
+   guard gates (`eth_sendRawTransaction*`, `eth_sendPrivateRawTransaction`, `eth_sendPrivateTransaction`,
+   `eth_sendBundle`, `mev_sendBundle`), `params` is rebuilt too, from an exact list of the fields each method
+   takes, and a key that is not exactly one of them (`Tx`, `TXS`, `txſ`) is refused, not dropped. Any request
+   whose params contain a non-ASCII key, or two keys that differ only in case (`params` and `Params`,
+   `tx` and `Tx`), is refused. Geth-based nodes, builders and relays match keys case-insensitively and fold
+   some Unicode letters onto ASCII, so the upstream could otherwise act on a different value from the one
+   the guard judged. Side effect: a pass-through request such as an `eth_call` state override keyed by both
+   the checksummed and the lowercase form of one address is refused too; use one form.
 1. **Parse and recover.** Decode the raw transaction, recover the sender and every 7702 authority.
    Unparseable or unrecoverable → refused. A legacy transaction without a chain id (pre-EIP-155) is refused,
    because it can be replayed on every chain.

@@ -24,6 +24,12 @@ l2-send-guard becomes one policy guard for agent wallets. It absorbs six single-
 - Legacy transactions without a chain id are refused (`REPLAYABLE_TX`).
 - Requests with keys that differ only in case are refused (`-32600`), and only `jsonrpc`, `id`, `method` and
   `params` are forwarded.
+- The params of every gated send method are rebuilt from an exact-key allowlist before they are forwarded. A
+  key that is not exactly one the method takes (for example `Tx` beside `bundle` in a `mev_sendBundle` item, or
+  `txſ` beside `txs` in `eth_sendBundle`) is refused with `-32602`, and a non-ASCII key anywhere in params is
+  refused with `-32600`, because Go-based upstreams fold such keys onto the real field names.
+- A reducing call (`approve(x, 0)`, `decreaseAllowance`, `setApprovalForAll(false)`) to a listed destination that
+  is not a listed token is held to that destination's `selectors` and `maxNativeWei`.
 - The `policy:check`, `demo:dual-layer`, `demo:safe-exec` and `demo:offline` scripts are replaced by
   `l2-send-guard check-policy` and `npm run demo`.
 
