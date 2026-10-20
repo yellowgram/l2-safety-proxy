@@ -1,59 +1,70 @@
 # Changelog
 
-## Unreleased
+## 1.0.0
 
-The package version stays **0.5.0** until a separate release bump. `npm publish` is not part of this change.
+l2-send-guard becomes one policy guard for agent wallets. It absorbs six single-purpose packages
+(`send-allow`, `send-approve-bound`, `send-permit2-bound`, `send-idempotency`, `recv-sweep-brake`,
+`recv-approval-watch`) and replaces the 0.x "thin Layer 2" policy. See [README#migrating](./README.md#migrating).
 
-### Issue #17 — Safe `execTransaction` ExecutionFailure abort (LaunchGate locks)
+### Breaking
 
-- Layer 1: Safe-shaped `execTransaction` (`0x6a761202`) hard-aborts on simulated `ExecutionFailure` even when outer status is success (`-32080`).
-- Certainty: `execTransaction` outer success without log/`debug_traceCall` inspection is **uncertain** (not definite forward).
-- Decode split: abort does not require inner revert bytes; optional `callTracer` enriches copy. GS013 / bubbled-inner fixtures covered.
-- Docs: [docs/SAFE_EXEC_DRIFT.md](./docs/SAFE_EXEC_DRIFT.md) — Protocol Kit complementarity + proposal→broadcast drift only; `execTransactionFromModule` residual / out of P0.
-- Sealed fixture demo: `npm run demo:safe-exec` (mock upstream only; no checkout URL).
-
-### Prior unreleased (operator pack)
-
-- Operator pack: [docs/OPERATOR.md](./docs/OPERATOR.md) and the templates under `docs/templates/`. Pre-install, tool↔allowlist change protocol, first-line triage, incident labels, upgrade, staging vs funded testnet, topology, latency, rollback. The blanks are yours to fill.
-- Bug issues that omit the offline repro are labeled `needs-repro` and closed after 14 days without an update (`.github/workflows/repro-triage.yml`). Vulnerability reports are outside that workflow.
-- CI also runs on Node 24 (current LTS), beside Node 20 and 22.
-- The compose sample sets `restart: unless-stopped`. Publish on the host stays `127.0.0.1:8545:8545`.
-
-## 0.5.0
-
-Minimum-support bar for the thin Guard. Pin `l2-send-guard@0.5.0`. Do not use `@latest`. The npm tarball ships `dist/` (CLI `l2-send-guard` → `dist/index.js`, library entry `dist/api.js`). No container image digest and no separate binary are published.
-
-### Behavior
-
-- Signed `chainId` is compared with the chain selected by `x-l2sg-chain` (name or numeric id) or the default chain. A mismatch returns **`-32084`** `chain_mismatch` and is not simulated or forwarded. Transactions with no `chainId` are not compared.
-- `L2SG_POLICY_ENABLED=true` with no `L2SG_POLICY_FILE` and no `L2SG_POLICY_ALLOWLIST` refuses to start.
-- A missing, unreadable, or schema-invalid `L2SG_POLICY_FILE` refuses to start. Policy does not silently turn off.
-- An **enabled** policy that still contains placeholder destinations (`0x1111…` / `0x2222…`, any repeated non-zero nibble) refuses to start.
-- An **enabled** policy with `allowAnyDestination: true` on the base document, a chain overlay, or `L2SG_POLICY_ALLOW_ANY` refuses to start. A file that stays disabled may still contain the flag. `npm run policy:check` flags that flag only when the file's `enabled` is true. It does not read env overrides; process start is the check for the merged config.
-- `L2SG_POLICY_ALLOWLIST` entries that are not `0x` + 40 hex refuse to start.
-- When policy is enabled and the raw transaction does not parse, the proxy returns **`-32083`** `policy_denied` with `policyCode: TX_UNPARSEABLE` and does not simulate or forward. Policy off keeps the Layer 1 path.
-- `/health` `policy.destinationCount` is the number of distinct addresses on the base map or any chain overlay. It is not the effective allowlist for one chain, and it does not list addresses. `policy.allowAnyDestination` is true when the base flag or any overlay is true.
-- `docker-compose.yml` publishes `127.0.0.1:8545:8545` and mounts the policy file read-only. The process inside the container still binds `0.0.0.0` so Docker's proxy can reach it, and it logs a wildcard-bind warning.
+- New policy format (one file: destinations, tokens, Permit2, 7702 delegation, rolling caps). A 0.x file is
+  refused at startup with a pointer to `l2-send-guard migrate-policy`.
+- `L2SG_POLICY_ENABLED` and the other `L2SG_POLICY_*` variables are removed and refused at startup.
+- A policy is required to start. `L2SG_POLICY=off` runs simulation only, with a warning.
+- `GUARD_MODE` defaults to `strict`. An invalid `GUARD_MODE` is an error.
+- An unknown chain in `L2SG_CHAINS`, or a chain with no RPC, is an error (0.x skipped it with a warning).
+- Signing methods (`eth_sign`, `personal_sign`, `eth_signTypedData*`, `wallet_sendCalls`) are refused with
+  `-32081` like `eth_sendTransaction`. Unknown submit-like methods (e.g. `eth_sendUserOperation`) are refused
+  with `-32083 METHOD_NOT_GATED`.
+- The `policy:check`, `demo:dual-layer`, `demo:safe-exec` and `demo:offline` scripts are replaced by
+  `l2-send-guard check-policy` and `npm run demo`.
 
 ### Added
 
-- `npm run policy:check` (self-test) and `npm run policy:check -- <file>` (strict).
-- `npm run demo:dual-layer` checks stdout against `docs/fixtures/dual-layer.expected.txt` (`-32080`, `-32081`, `-32083`, `-32084`, chain select).
-- `examples/agent-viem-halt.mjs` — `-32083` halts, `-32080` does not rebroadcast the same raw, never `eth_sendTransaction`.
-- `error.data` for `-32080`..`-32083` includes `decision`, `certainty`, `confidence`, `chainId`, `layer`, and `policyCode` (`null` when the decision is not a policy deny).
-- Optional `L2SG_DECISION_LOG` JSONL. Schema: [docs/DECISION_LOG.md](./docs/DECISION_LOG.md).
-- Docs: [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md), [docs/AGENT_DECISION_TABLE.md](./docs/AGENT_DECISION_TABLE.md), [docs/RESIDUAL_BYPASSES.md](./docs/RESIDUAL_BYPASSES.md), [docs/BUYER_ACCEPTANCE.md](./docs/BUYER_ACCEPTANCE.md), [docs/DESIGN_ITERS.md](./docs/DESIGN_ITERS.md), [SUPPORT.md](./SUPPORT.md), [SECURITY.md](./SECURITY.md).
+- Calls inside Multicall3, `multicall`, Safe `execTransaction`/`multiSend`, smart-account `execute`/`executeBatch`,
+  ERC-7821/7579 `execute` and Universal Router are decoded and checked one by one.
+- ERC-20/721/1155 transfer calldata, approvals (`approve`, `increaseAllowance`, EIP-2612 and DAI `permit`,
+  `setApprovalForAll`) and every Permit2 entry point are checked against per-token rules. Any approval
+  ≥ 2^128 counts as unlimited and is refused.
+- EIP-7702: `authorizationList` policy (delegate allowlist, chain-0 authorizations refused by default), and
+  simulation with the delegation applied (`eth_simulateV1` state overrides; `eth_call` only if the RPC honours them).
+- Rolling caps per sender for ETH and each token.
+- `Idempotency-Key` header, persistent, with a TTL, and in-flight recovery that asks the chain before reusing a key.
+  New error `-32087`.
+- Bypass detection: a nonce that moves without the guard locks the sender (`-32088`) until
+  `l2-send-guard unlock`. `L2SG_BYPASS=alert|off` and `L2SG_ALERT_WEBHOOK`.
+- State stores: file (default), Postgres (`L2SG_STORE=postgres://…`, optional `pg` peer dependency), memory.
+- Every submit method is checked: `eth_sendRawTransactionConditional`, `eth_sendPrivateRawTransaction`,
+  `eth_sendPrivateTransaction`, `eth_sendBundle`, `mev_sendBundle`.
+- Receive-side watch (`L2SG_WATCH_AGENTS`): inbound transfers labelled clear/quarantine/toxic, address
+  poisoners refused as destinations, unexpected approvals lock the sender and come with revoke calldata.
+- Library: `Guard`, `createGuardedSigner` (policy enforced at signing, including EIP-2612/Permit2 typed data),
+  `evaluateTx`, `flattenCalls`, `watchInbound`, stores.
+- SDK: `sendRawTransaction({ raw, idempotencyKey })`, `GuardRpcError`, `-32087`/`-32088` in `classifyGuardError`.
+- `l2-send-guard check-policy`, `migrate-policy` and `unlock` commands. Chain templates for `ethereum`,
+  `arbitrum`, `optimism`, `base` and `sepolia` (bring your own RPC).
+- `npm run demo`: an offline walk-through of seven sends.
 
-### Upgrade notes
+### Fixed
 
-- `GUARD_MODE` (`open` default, `strict`) is canonical. `L2SG_GUARD_MODE` is an alias. `L2SG_FAIL_OPEN` applies only when `GUARD_MODE` is unset. That legacy alias stays at least through **0.6.0** and will not be removed before then.
-- Error code meanings `-32080` definite-revert abort, `-32081` unsigned refusal, `-32082` strict uncertain abort, and `-32083` policy deny are unchanged. `-32081` `error.data` gained `decision`, `certainty`, `confidence`, `layer`, and `policyCode` and kept `refused`, `code`, `useMethod`, and `hint`.
-- Supported chains remain `arb-sepolia`, `op-sepolia`, and `base-sepolia` only. No mainnet chain was added.
-- Policy JSON: unknown keys (other than `_` comment keys) now fail load and `policy:check`. `humanGate.mode`, when set, must be `"stop"`.
+- `migrate-policy` never widens access: `requireApproval` destinations stay refused, and contract creation
+  allowed by one chain overlay isn't carried over to all chains.
+- `unlock` resets the sender's baseline from the chain, so the next send isn't locked again.
+
+### Removed
+
+- The 0.x policy engine, the `agent:loop` script, and internal planning documents.
+
+## 0.5.0
+
+Chain-id mismatch error `-32084`; startup refusals for a missing, invalid or placeholder policy;
+`TX_UNPARSEABLE` under policy; stable `error.data` fields; optional decision log; compose binds to localhost.
+Safe `execTransaction` inner `ExecutionFailure` aborts as a definite revert.
 
 ## 0.4.0
 
-SDK helpers, `/health` policy summary, and an offline dual-layer demo that printed `-32080` and `-32083` without a checked-in transcript diff, chain mismatch enforcement, or `policy:check`.
+SDK helpers, a `/health` policy summary and an offline demo.
 
 ## 0.3.0
 

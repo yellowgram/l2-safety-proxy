@@ -1,6 +1,6 @@
 {
   "name": "l2-send-guard",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "description": "Policy guard for agent and bot wallets: checks every signed EVM transaction (allowlists, approve/Permit2 bounds through Multicall3, Safe and 7702 batches, rolling caps, idempotency) and simulates it before your RPC sees it. Never holds keys.",
   "type": "module",
   "main": "./dist/api.js",
@@ -46,7 +46,7 @@
     "demo:sepolia": "node scripts/demo-sepolia.mjs",
     "eval": "tsx evaluation/run.ts",
     "eval:generate": "tsx evaluation/generate-fixtures.ts",
-    "prepack": "npm run build"
+    "prepack": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && npm run build"
   },
   "engines": {
     "node": ">=20"

@@ -11,6 +11,5 @@ describe("package version pin", () => {
       version: string;
     };
     expect(pkg.version).toBe(PACKAGE_VERSION);
-    expect(PACKAGE_VERSION).toBe("0.5.0");
   });
 });
