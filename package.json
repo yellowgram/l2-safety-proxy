@@ -95,10 +95,12 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "viem": "^2.21.0"
+    "viem": "^2.57.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
     "tsx": "^4.19.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
