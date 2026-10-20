@@ -35,9 +35,14 @@ the codes. The usual causes:
   moves it out. End the plan with `SWEEP` (or `UNWRAP_WETH` for WETH) to `MSG_SENDER`.
 - `NON_CANONICAL_ABI`: the calldata isn't the exact standard ABI encoding the target reads. Usually extra bytes
   appended after the arguments (an attribution suffix, for example), or a Universal Router V3 path with leftover
-  bytes. Encode it with a standard encoder and send it without a suffix. If every Universal Router swap gets
-  this code, the calldata is built for Universal Router 2.1 or later, which the guard doesn't read (README,
-  limits). Build it for a 2.0 router and send it there, or don't route swaps through the guard yet.
+  bytes. Encode it with a standard encoder and send it without a suffix. Most Universal Router 2.1.2 calldata
+  seen on chain ends in extra bytes starting with `unix` (`0x756e6978…`); drop everything after the arguments
+  of `execute`. If every swap gets this code without a suffix, the calldata is built for a different router
+  version than the address it's sent to: 2.1 inputs to a 2.0 router, 2.0 inputs to a 2.1 router, or a router
+  the guard doesn't list as 2.1 (2.2, or a chain without a built-in template), which it reads as 2.0.
+- `ROUTER_V4_HOOK_NOT_ALLOWED`: the swap goes through a Uniswap v4 pool with a hook. Route through pools without
+  hooks, or, if you've read the hook's code and trust it, add its address to `universalRouter.v4Hooks`.
+- `ROUTER_COMMAND_UNCHECKED` on a v4 route sent to a 2.0 router: the guard only reads v4 swaps on 2.1 routers.
 - `CALLDATA_TOO_LARGE`: the transaction carries more than 128 KiB of calldata. Split the batch.
 
 ## -32082 (simulation couldn't decide)

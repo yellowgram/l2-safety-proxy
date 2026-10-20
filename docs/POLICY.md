@@ -30,7 +30,7 @@ every such destination. See [Contract destinations](#contract-destinations).
   "permit2": { "maxExpirySeconds": 2592000, "address": "0x…" },
   "delegation": { "mode": "deny", "delegates": ["0x…"], "allowAnyChain": false },
   "accounts": ["0x…"],
-  "universalRouter": { "recipients": ["0x…"] },
+  "universalRouter": { "recipients": ["0x…"], "v4Hooks": [] },
   "allowContractCreation": false,
   "typedData": { "allowUnknown": false }
 }
@@ -63,6 +63,7 @@ every such destination. See [Contract destinations](#contract-destinations).
 | `delegation.allowAnyChain` | `false` | Allow authorizations signed for chain id 0 (valid on every chain) |
 | `accounts` | none | Smart accounts the agent owns (its Safe, its 4337 wallet). Calls they make are checked one by one, they don't need to be destinations, and their admin functions (modules, owners, threshold, guards, fallback handler) are always refused. So is any other function called on the account itself (or on the sender) that is not a wrapper the guard unpacks (`execute`, `executeBatch`, 7579 `execute`, `multicall`), such as `upgradeToAndCall` or `addOwnerAddress`. An address can't be both an account and a destination, and the router constants `0x…01`/`0x…02` can't be accounts |
 | `universalRouter.recipients` | none | Extra addresses a swap's output may go to. The sender and one of `accounts` always may; any other contract in the same transaction (Multicall3, another router) may not (`ROUTER_PAYOUT_TO_WRAPPER`) unless listed here. The router that runs the command (`ADDRESS_THIS`) is only an intermediate step: what a plan puts there must leave in the same plan (`ROUTER_OUTPUT_STRANDED`). `0x…01`/`0x…02` can't be listed |
+| `universalRouter.v4Hooks` | none | Uniswap v4 hook contracts a swap on a Universal Router 2.1 router may route through. A v4 pool with a hook runs that hook's code inside the swap, and the hook can change the amounts, so a pool key or path hop naming any other non-zero hook is refused (`ROUTER_V4_HOOK_NOT_ALLOWED`). Pools without a hook (the zero address) are always allowed, and the zero address can't be listed. List a hook only if you have read its code |
 | `allowContractCreation` | `false` | Allow deploying contracts |
 | `typedData.allowUnknown` | `false` | Let the guarded signer sign EIP-712 messages it can't check |
 | `note` | — | Free text on destinations and tokens, ignored |
@@ -113,8 +114,17 @@ A destination is fail-closed: unless you say otherwise, the agent may not call a
    Universal Router command input, ERC-7579 execution data, token and Permit2 calls) is decoded as the target
    contract decodes it, re-encoded and compared byte for byte; anything else is `NON_CANONICAL_ABI`. A V3
    path must be a token followed by whole pools (fee + token), 20 + 23·k bytes. Universal Router inputs are
-   read with the 1.x/2.0 layout; 2.1 swaps (a sixth `minHopPriceX36` argument, commands with bit `0x40`) are
-   refused. WETH is recognised by the router's own WETH address on the chains the
+   read with the 1.x/2.0 layout, except on the official Universal Router 2.1.1 and 2.1.2 addresses of the
+   built-in chains, which are read with the 2.1 layout: command mask `0x7f`, a sixth `minHopPriceX36` argument
+   on V2/V3 swaps (empty or one per hop), `PAY_PORTION_FULL_PRECISION` (`0x07`, a payout), and `V4_SWAP`
+   (`0x10`). In a `V4_SWAP` each action's params are decoded with the 2.1 structs and must round-trip; only the
+   swap, `SETTLE`, `SETTLE_ALL`, `TAKE`, `TAKE_ALL` and `TAKE_PORTION` actions are accepted. Takes are payouts
+   (`TAKE_ALL` pays the router's caller), and a take into the router is put on the plan's ledger. A settle the
+   router pays (`payerIsUser` false, or native ETH) counts as spending what the router holds when it pays
+   `CONTRACT_BALANCE`, an explicit amount, or the open delta of a currency used in that `V4_SWAP` only as the
+   input of exact-input swaps with explicit amounts and settled once (then the debt is their sum). Pools with
+   a hook need `universalRouter.v4Hooks`. `ACROSS_V4_DEPOSIT_V3` (`0x40`) and the rest of `0x40`–`0x7f` are
+   refused (`ROUTER_COMMAND_UNCHECKED`). `executeSigned` is unpacked like `execute`. WETH is recognised by the router's own WETH address on the chains the
    proxy ships templates for; on other chains, `SWEEP` the WETH instead of `UNWRAP_WETH`.
 3. Each inner call is judged:
    - a Universal Router payout must go to the sender, one of `accounts` or a `universalRouter.recipients` entry
@@ -167,7 +177,7 @@ such as `transferWithAuthorization`, is allowed. `check-policy` warns about this
 | `AUTHORIZATION_WRONG_CHAIN` | 7702 authorization for another chain |
 | `AUTHORIZATION_UNRECOVERABLE` | 7702 authorization signature doesn't recover |
 | `POISONED_ADDRESS` | The receive watch flagged this address as a look-alike |
-| `NON_CANONICAL_ABI` | Calldata the target would read differently from the guard or partly ignore: not the exact standard ABI encoding (trailing bytes, unusual offsets or lengths, dirty padding), a Universal Router input that doesn't round-trip, a V3 path that isn't 20 + 23·k bytes, a router command byte with bit `0x40`, or an ERC-7579 mode with a payload. Every Universal Router 2.1 swap gets this code: the guard reads the 1.x/2.0 layout only |
+| `NON_CANONICAL_ABI` | Calldata the target would read differently from the guard or partly ignore: not the exact standard ABI encoding (trailing bytes, unusual offsets or lengths, dirty padding), a Universal Router input that doesn't round-trip, a V3 path that isn't 20 + 23·k bytes, an ERC-7579 mode with a payload, or Universal Router calldata built for the other layout (2.0 inputs sent to a 2.1 router, or the reverse). On a 2.0 router: a command byte with bit `0x40`. On a 2.1 router: a `minHopPriceX36` whose length is neither 0 nor the hop count, or an empty v4 path |
 | `CALLDATA_TOO_LARGE` | The transaction's calldata is over 128 KiB; refused before anything is decoded |
 | `DELEGATECALL_DENIED` | A delegatecall other than a Safe's call to MultiSend |
 | `TOO_DEEP` | Batches nested too deeply |
@@ -176,6 +186,7 @@ such as `transferWithAuthorization`, is allowed. `check-policy` warns about this
 | `ROUTER_RECIPIENT_NOT_ALLOWED` | Swap output going to someone else |
 | `ROUTER_PAYOUT_TO_WRAPPER` | Swap output going to another contract in the same transaction (e.g. the Multicall3 that called the router, directly or through the `MSG_SENDER` constant), where anyone could take it |
 | `ROUTER_OUTPUT_STRANDED` | A Universal Router plan leaves funds in the router itself: a swap, `WRAP_ETH`/`UNWRAP_WETH` or Permit2 pull to `ADDRESS_THIS`, or ETH sent with the call, with no later `SWEEP`/`UNWRAP_WETH` to an allowed payee (or swap spending the whole balance). Anyone can take a balance left in the router. A sweep back to `ADDRESS_THIS`, a partial `TRANSFER`/`PAY_PORTION` and commands flagged "allow revert" don't count |
+| `ROUTER_V4_HOOK_NOT_ALLOWED` | A Universal Router 2.1 v4 swap routes through a pool whose hook isn't in `universalRouter.v4Hooks` |
 | `WINDOW_CAP_EXCEEDED` | Over a rolling cap |
 | `TYPED_DATA_UNKNOWN` | (guarded signer) EIP-712 message it can't check |
 | `TYPED_DATA_AUTHORIZES_TX` | (guarded signer) `SafeTx`, `SafeMessage` or a 4337 user operation: always refused |

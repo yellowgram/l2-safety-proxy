@@ -16,7 +16,7 @@ What it checks, in one pass:
   "Unlimited" means any amount ≥ 2^128, not just `2^256-1`.
 - **What's hidden inside batches.** Multicall3, `multicall`, Safe `execTransaction` and `multiSend`,
   smart-account `execute`/`executeBatch`, ERC-7821 / EIP-7702 batch `execute`, and Uniswap Universal Router
-  (the 1.x/2.0 command layout; see [limits](#threat-model-and-limits) for 2.1) are unpacked and every inner call is judged by the same rules. Delegatecall is refused, except a Safe's
+  (1.x/2.0, and 2.1.1/2.1.2 including v4 swaps; see [limits](#threat-model-and-limits)) are unpacked and every inner call is judged by the same rules. Delegatecall is refused, except a Safe's
   call to MultiSend, whose entries are each checked.
 - **EIP-7702 delegation.** A type-4 transaction's `authorizationList` is checked: delegating the account is
   refused unless the delegate is on your list, and an authorization valid on every chain (`chainId 0`) is
@@ -283,18 +283,45 @@ close the gap:
   the router reads them; a padded or malformed one is refused (`NON_CANONICAL_ABI`). Within those rules the guard doesn't track amounts:
   prices and slippage are not checked, and the amount a swap spends is bounded only by the token approvals the
   router (or Permit2) holds. Keep those approvals capped.
-- **Universal Router versions: most current swaps are refused.** The guard reads the command layout of
-  Universal Router 1.x and 2.0. Universal Router 2.1 (2.1.1, 2.1.2) adds a sixth argument to the V2 and V3 swap
-  commands (`minHopPriceX36`) and new commands in the `0x40` range, and 2.2 builds on 2.1. The guard can't read
-  those, so it refuses them (`NON_CANONICAL_ABI`): **every swap built for Universal Router 2.1 or later is
-  refused.** As of October 2026 that is most swaps. The Uniswap Trading API builds calldata for 2.1.2 by default on
-  every chain that has it, which includes all the built-in chains with an official router (Ethereum, Arbitrum,
-  OP Mainnet, Base, Sepolia, Base Sepolia). It stops serving 2.0 on October 21, 2026. Arbitrum Sepolia and
-  OP Sepolia have no official Universal Router. Swaps pass only when they are built for a 2.0 (or 1.x)
-  router and sent to it. One way is `@uniswap/universal-router-sdk` with its default
-  `UniversalRouterVersion.V2_0`; the 2.0 routers are still deployed. Even then, a route through v4 pools
-  (command `0x10`) is refused on every version. Nothing is let through that the guard can't read; the cost is
-  that such swaps don't go out.
+- **Universal Router versions.** The guard picks the input layout by the router's address. The official
+  Universal Router 2.1.1 and 2.1.2 deployments on the built-in chains that have one (Ethereum, OP Mainnet,
+  Base, Arbitrum, Sepolia, Base Sepolia; Arbitrum Sepolia and OP Sepolia have none) are read with the 2.1
+  layout. Every other address, including the 2.0 routers, is read with the 1.x/2.0 layout exactly as before,
+  and calldata built for the other layout is refused (`NON_CANONICAL_ABI`). The Uniswap Trading API builds
+  for 2.1.2 by default and stops serving 2.0 and 2.1.1 on October 21, 2026.
+
+  On a 2.1 router these are checked and can pass:
+  - the V2 and V3 swaps (`0x00`, `0x01`, `0x08`, `0x09`) with their sixth argument `minHopPriceX36`, which must be
+    empty or have one entry per hop (any other length makes the router revert);
+  - `PAY_PORTION_FULL_PRECISION` (`0x07`), judged like `PAY_PORTION`;
+  - `V4_SWAP` (`0x10`) with the v4 swap actions the 2.1 router runs: the four `SWAP_EXACT_*` actions, `SETTLE`,
+    `SETTLE_ALL`, `TAKE`, `TAKE_ALL` and `TAKE_PORTION`. Every `TAKE` is a payout like any other; `TAKE_ALL` pays
+    the router's caller. A take into the router must leave it again (`ROUTER_OUTPUT_STRANDED`). A settle the
+    router pays (native ETH always is) counts as moving the router's funds out only when the amount is known.
+    A v4 pool with a hook runs the hook's own code inside the swap, so a pool or path hop with a hook is refused
+    (`ROUTER_V4_HOOK_NOT_ALLOWED`) unless the hook is listed in `universalRouter.v4Hooks`;
+  - `executeSigned`, which runs the same commands as `execute` (list its selector to use it); and all the 2.0
+    commands, which 2.1 reads the same way.
+
+  Still refused: `ACROSS_V4_DEPOSIT_V3` (`0x40`, a bridge deposit to a recipient on another chain) and every
+  other command in `0x40`–`0x7f`; any v4 action other than the swap ones above (2.1's router reverts on them);
+  `V4_SWAP` on a 2.0 router (2.0's v4 structs differ and aren't modelled); `V4_INITIALIZE_POOL`, the position
+  manager commands and every other command the guard doesn't model (`ROUTER_COMMAND_UNCHECKED`); Universal
+  Router 2.2 and any router or chain not in the built-in list, which get the 2.0 layout; Uniswap's `SwapProxy`
+  and other contracts that take Universal Router-style plans (calls to them are ordinary calls, judged by their
+  destination's `selectors`).
+
+  **Most 2.1.2 calldata seen on chain is refused as sent.** 94 of 96 2.1.2 transactions sampled on Ethereum,
+  OP Mainnet, Base and Arbitrum in October 2026 carry 10 to 22 extra bytes after the ABI encoding of
+  `execute()`, starting with the ASCII bytes `unix`. Uniswap doesn't document where they come from. The router
+  ignores them; the guard refuses all trailing bytes (`NON_CANONICAL_ABI`), as it did in 2.0. With the suffix
+  removed, the same transactions decode and pass when the policy allows their payees, hooks and approvals.
+  `@uniswap/universal-router-sdk` with `UniversalRouterVersion.V2_1_2` adds nothing after the arguments; with
+  other builders, strip the bytes after the arguments before signing.
+
+  Prices are still not checked: `amountOutMinimum` and `minHopPriceX36` are not judged, a v4 pool can have any
+  fee, and a token on your list can be swapped for any token. Bound what a swap can spend with capped
+  approvals.
 - **Calldata size.** A transaction with more than 128 KiB of calldata is refused (`CALLDATA_TOO_LARGE`) before
   anything is decoded. ABI offsets and lengths are checked for the canonical layout before values are
   expanded, so crafted offsets can't make the proxy decode the same bytes over and over.
@@ -386,6 +413,22 @@ The compose file publishes the port on `127.0.0.1` only and keeps state in a vol
 
 ## Migrating
 
+### From l2-send-guard 2.0 to 2.1
+
+No policy changes are needed. What changes:
+
+- Calls to the official Universal Router 2.1.1 and 2.1.2 addresses on the built-in chains are read with the 2.1
+  layout, so swaps built for them can pass (README, [limits](#threat-model-and-limits)). Calls to any other
+  router are judged exactly as in 2.0. Calldata built for 2.0 and sent to a 2.1 router is now refused
+  (`NON_CANONICAL_ABI`); the router would revert on it anyway.
+- `V4_SWAP` on a 2.1 router is checked instead of refused. Pools with a hook are refused with the new code
+  `ROUTER_V4_HOOK_NOT_ALLOWED` unless the hook is listed in the new policy key `universalRouter.v4Hooks`.
+- `executeSigned(bytes,bytes[],bytes32,bytes32,bool,bytes32,bytes,uint256)` is unpacked like `execute` on every
+  contract, so its commands are judged even when the destination has `"allowAnySelector": true`. Add it to the
+  router's `selectors` to use it.
+- The guard still refuses bytes after the arguments. Calldata from the Uniswap app or Trading API that carries
+  a suffix must have it removed first.
+
 ### From l2-send-guard 1.x to 2.0
 
 2.0 makes contract destinations fail closed. In 1.x a destination without `selectors` allowed every function
@@ -419,7 +462,7 @@ on it, so allowlisting a DEX router allowed its admin and sweep functions too. I
 - Calldata the guard decodes must be the exact standard encoding, with nothing after the arguments
   (`NON_CANONICAL_ABI`). Standard ABI encoders such as viem and ethers produce it; drop any suffix you append to
   calldata, such as an attribution tag. Universal Router V3 paths must be whole pools (20 + 23·k bytes).
-  Universal Router 2.1 swaps are refused (see [limits](#threat-model-and-limits)).
+  (2.0 refused Universal Router 2.1 swaps; 2.1.0 reads them, see [below](#from-l2-send-guard-20-to-21).)
 - Calldata over 128 KiB is refused (`CALLDATA_TOO_LARGE`).
 - A key written twice in one object of a policy file (for example the same destination twice) is refused.
   Before, the last one silently won.
