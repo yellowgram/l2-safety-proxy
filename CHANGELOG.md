@@ -11,7 +11,6 @@ swaps. All 2.0 rules hold unchanged, and calls to any other router are judged ex
   Arbitrum, Sepolia, Base Sepolia; from Uniswap/universal-router `deploy-addresses/`) are read with the 2.1
   input layout: command mask `0x7f`; the sixth V2/V3 swap argument `minHopPriceX36`, which must be empty or
   have one entry per hop; `PAY_PORTION_FULL_PRECISION` (`0x07`), judged as a payout like `PAY_PORTION`.
-  Exported as `UR_V2_1` and `ur21Routers(chainId)`.
 - `V4_SWAP` (`0x10`) on a 2.1 router: every action's params are decoded with the 2.1 v4 structs and must
   round-trip byte for byte. The swap actions, `SETTLE`, `SETTLE_ALL`, `TAKE`, `TAKE_ALL` and `TAKE_PORTION` are
   accepted; any other action is refused (`ROUTER_COMMAND_UNCHECKED`). Takes are payouts under the same rules as
