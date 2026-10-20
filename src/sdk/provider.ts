@@ -154,3 +154,44 @@ export function applyGuardHeaders(
     }
   }
 }
+
+/** A JSON-RPC error returned by the proxy (or the upstream), with the guard's `data`. */
+export class GuardRpcError extends Error {
+  constructor(public code: number, message: string, public data?: unknown) {
+    super(message);
+    this.name = "GuardRpcError";
+  }
+}
+
+/**
+ * Send one signed transaction through the proxy, optionally under an
+ * Idempotency-Key. Retrying with the same key never sends a second, different
+ * transaction: the proxy returns the first hash, or -32087 if the key already
+ * sent something else. Resolves to the tx hash; rejects with GuardRpcError.
+ *
+ * viem's transport sets headers once per client, so per-request keys are
+ * easiest here: sign with viem (`account.signTransaction`), send with this.
+ */
+export async function sendRawTransaction(
+  opts: GuardProviderOptions & { raw: `0x${string}`; idempotencyKey?: string; method?: string }
+): Promise<`0x${string}`> {
+  const { url, headers } = createGuardConnection(opts);
+  if (opts.idempotencyKey !== undefined) {
+    if (!/^[\x21-\x7e]{1,200}$/.test(opts.idempotencyKey)) throw new Error("idempotencyKey must be 1–200 printable ASCII characters, no spaces");
+    headers["idempotency-key"] = opts.idempotencyKey;
+  }
+  const res = await globalThis.fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: opts.method ?? "eth_sendRawTransaction", params: [opts.raw] }),
+  });
+  let body: { result?: unknown; error?: { code: number; message: string; data?: unknown } };
+  try {
+    body = await res.json();
+  } catch {
+    throw new GuardRpcError(-32603, `proxy answered HTTP ${res.status} without JSON`);
+  }
+  if (body.error) throw new GuardRpcError(body.error.code, body.error.message, body.error.data);
+  if (typeof body.result !== "string") throw new GuardRpcError(-32603, "proxy returned no transaction hash");
+  return body.result as `0x${string}`;
+}

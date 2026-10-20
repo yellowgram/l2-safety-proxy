@@ -8,9 +8,13 @@
  *   -32082  strict-mode uncertain abort (Layer 1)
  *   -32083  policy_denied (Layer 2 — never fail-open)
  *   -32084  chain_mismatch (signed chainId ≠ selected chain)
+ *   -32087  idempotency_conflict (key reused for another tx) or state store down
+ *   -32088  bypass_locked (a tx from this sender landed without the guard)
  */
 
 import {
+  ERR_BYPASS_LOCKED,
+  ERR_IDEMPOTENCY,
   ERR_CHAIN_MISMATCH,
   ERR_DEFINITE_REVERT,
   ERR_POLICY_DENIED,
@@ -19,6 +23,8 @@ import {
 } from "../types/index.js";
 
 export {
+  ERR_BYPASS_LOCKED,
+  ERR_IDEMPOTENCY,
   ERR_CHAIN_MISMATCH,
   ERR_DEFINITE_REVERT,
   ERR_POLICY_DENIED,
@@ -39,6 +45,8 @@ export type GuardErrorKind =
   | "strict_uncertain"
   | "unsigned_refused"
   | "chain_mismatch"
+  | "idempotency_conflict"
+  | "bypass_locked"
   | "other";
 
 function asError(err: unknown): GuardRpcErrorLike | null {
@@ -89,7 +97,9 @@ export function isGuardAbortError(err: unknown): boolean {
     code === ERR_POLICY_DENIED ||
     code === ERR_STRICT_UNCERTAIN ||
     code === ERR_UNSIGNED_SEND_REFUSED ||
-    code === ERR_CHAIN_MISMATCH
+    code === ERR_CHAIN_MISMATCH ||
+    code === ERR_IDEMPOTENCY ||
+    code === ERR_BYPASS_LOCKED
   );
 }
 
@@ -100,6 +110,8 @@ export function classifyGuardError(err: unknown): GuardErrorKind {
   if (code === ERR_STRICT_UNCERTAIN) return "strict_uncertain";
   if (code === ERR_UNSIGNED_SEND_REFUSED) return "unsigned_refused";
   if (code === ERR_CHAIN_MISMATCH) return "chain_mismatch";
+  if (code === ERR_IDEMPOTENCY) return "idempotency_conflict";
+  if (code === ERR_BYPASS_LOCKED) return "bypass_locked";
   return "other";
 }
 

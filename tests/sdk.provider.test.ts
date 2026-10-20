@@ -107,3 +107,26 @@ describe("sdk provider helpers", () => {
     expect(c.headers[GUARD_CHAIN_HEADER]).toBe("arb-sepolia");
   });
 });
+
+describe("sendRawTransaction", () => {
+  it("sends the Idempotency-Key header and surfaces guard errors with code and data", async () => {
+    const { sendRawTransaction, GuardRpcError } = await import("../src/sdk/provider.js");
+    const { classifyGuardError } = await import("../src/sdk/errors.js");
+    const seen: Record<string, string>[] = [];
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (_u: unknown, init?: RequestInit) => {
+      seen.push(Object.fromEntries(new Headers(init?.headers).entries()));
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32087, message: "conflict", data: { policyCode: "IDEMPOTENCY_CONFLICT" } } }));
+    }) as typeof fetch;
+    try {
+      const err = await sendRawTransaction({ proxyUrl: "http://127.0.0.1:1", chain: "base-sepolia", raw: "0x02", idempotencyKey: "invoice-7" }).catch((e) => e);
+      expect(err).toBeInstanceOf(GuardRpcError);
+      expect(classifyGuardError(err)).toBe("idempotency_conflict");
+      expect(seen[0]!["idempotency-key"]).toBe("invoice-7");
+      expect(seen[0]!["x-l2sg-chain"]).toBe("base-sepolia");
+      await expect(sendRawTransaction({ proxyUrl: "http://x", raw: "0x02", idempotencyKey: "has space" })).rejects.toThrow(/printable/);
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+});

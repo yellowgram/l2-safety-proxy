@@ -9,11 +9,15 @@ export {
   viemHttpArgs,
   ethersV6Connection,
   applyGuardHeaders,
+  sendRawTransaction,
+  GuardRpcError,
   type GuardProviderOptions,
   type GuardConnection,
 } from "./provider.js";
 
 export {
+  ERR_BYPASS_LOCKED,
+  ERR_IDEMPOTENCY,
   ERR_CHAIN_MISMATCH,
   ERR_DEFINITE_REVERT,
   ERR_POLICY_DENIED,
