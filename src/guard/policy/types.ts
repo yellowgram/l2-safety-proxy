@@ -14,10 +14,20 @@ export interface Policy {
   typedData: { allowUnknown: boolean };
 }
 
+/**
+ * What may be sent to one destination. A call with calldata is allowed only if its 4-byte
+ * selector is in `selectors`, or `anySelector` is set. A plain value transfer (empty calldata)
+ * is allowed if `selectors` is unset or contains "0x". With neither `selectors` nor
+ * `anySelector`, the destination takes plain value transfers only (fail closed).
+ */
 export interface DestinationRule {
   maxNativeWei?: bigint;
-  /** If set, only these 4-byte selectors may be called. "0x" allows plain value transfers. */
+  /** Only these 4-byte selectors may be called. "0x" allows plain value transfers. */
   selectors?: Set<string>;
+  /** `allowAnySelector: true`: every function may be called. An explicit, loud opt-in. */
+  anySelector?: boolean;
+  /** `type: "eoa"`: declared a plain account, so only plain value transfers are allowed. */
+  eoa?: boolean;
 }
 
 export interface TokenRule {
@@ -50,6 +60,7 @@ export type DenyCode =
   | "CONTRACT_CREATION_DENIED"
   | "DESTINATION_NOT_ALLOWED"
   | "SELECTOR_NOT_ALLOWED"
+  | "SELECTORS_REQUIRED"
   | "OVER_CAP"
   | "TOKEN_NOT_ALLOWED"
   | "RECIPIENT_NOT_ALLOWED"

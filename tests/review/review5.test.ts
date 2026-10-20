@@ -73,7 +73,7 @@ describe("L2-2: guarded signer messages and typed data", () => {
 
 describe("L2-4: the agent's own account", () => {
   it("a policy listing an account as a destination does not load", () => {
-    expect(() => parsePolicy({ accounts: [SAFE], destinations: { [SAFE]: {} } })).toThrow(/also listed in accounts/);
+    expect(() => parsePolicy({ accounts: [SAFE], destinations: { [SAFE]: { allowAnySelector: true } } })).toThrow(/also listed in accounts/);
   });
   it("account admin calls are denied, including a 7702 self-call", async () => {
     const enableModule = encodeFunctionData({ abi: parseAbi(["function enableModule(address)"]), args: [ATTACKER] });

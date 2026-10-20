@@ -24,7 +24,7 @@ const chain = {
   ecosystem: "arbitrum" as const,
 };
 
-function config(policy: unknown = { destinations: { [OK]: {} } }, extra: Partial<GuardConfig> = {}, guardOpts = {}): GuardConfig {
+function config(policy: unknown = { destinations: { [OK]: { type: "eoa" } } }, extra: Partial<GuardConfig> = {}, guardOpts = {}): GuardConfig {
   return {
     listenHost: "127.0.0.1",
     listenPort: 0,
@@ -77,7 +77,7 @@ describe("1.0 proxy gate", () => {
   });
 
   it("denies a whole bundle when one tx fails and gives back what the others reserved", async () => {
-    const policy = { window: { seconds: 3600 }, native: { windowMaxWei: (2n * ETH).toString() }, destinations: { [OK]: {} } };
+    const policy = { window: { seconds: 3600 }, native: { windowMaxWei: (2n * ETH).toString() }, destinations: { [OK]: { type: "eoa" } } };
     const cfg = config(policy);
     const good = await sign(OK, 0, 2n * ETH);
     const bad = await sign(BAD, 1, 1n);
@@ -130,7 +130,7 @@ describe("1.0 proxy gate", () => {
   });
 
   it("an idempotent retry of a sent transaction returns its hash without simulating or sending again", async () => {
-    const cfg = config({ destinations: { [OK]: {} } });
+    const cfg = config({ destinations: { [OK]: { type: "eoa" } } });
     const headers = new Headers({ "idempotency-key": "pay-1" });
     const raw = await sign(OK, 0, ETH);
     const forward = vi.fn(async () => ({ jsonrpc: "2.0" as const, id: 1, result: "0xupstream" }));
@@ -145,7 +145,7 @@ describe("1.0 proxy gate", () => {
   });
 
   it("an idempotent retry after an unknown outcome rebroadcasts the same bytes without simulating", async () => {
-    const cfg = config({ destinations: { [OK]: {} } });
+    const cfg = config({ destinations: { [OK]: { type: "eoa" } } });
     const headers = new Headers({ "idempotency-key": "pay-2" });
     const raw = await sign(OK, 0, ETH);
     const flaky = vi.fn(async () => { throw new Error("socket hang up"); });
@@ -159,7 +159,7 @@ describe("1.0 proxy gate", () => {
   });
 
   it("a definite revert gives back the reserved cap and frees the idempotency key", async () => {
-    const policy = { window: { seconds: 3600 }, native: { windowMaxWei: ETH.toString() }, destinations: { [OK]: {} } };
+    const policy = { window: { seconds: 3600 }, native: { windowMaxWei: ETH.toString() }, destinations: { [OK]: { type: "eoa" } } };
     const cfg = config(policy);
     const headers = new Headers({ "idempotency-key": "k1" });
     const revert = vi.fn(async (): Promise<SimResult> => ({ ok: false, method: "eth_call", confidence: "definite", reason: "nope", code: "DEFINITE_REVERT" }));

@@ -40,8 +40,8 @@ describe("health policy summary + decision counters", () => {
   it("/health includes policy summary without addresses and zero counters", async () => {
     const config = baseConfig({
       destinations: {
-        "0x1111111111111111111111111111111111111111": {},
-        "0x2222222222222222222222222222222222222222": {},
+        "0x1111111111111111111111111111111111111111": { type: "eoa" },
+        "0x2222222222222222222222222222222222222222": { selectors: ["deposit()"] },
       },
     });
     const server = createServer(config);
@@ -88,7 +88,7 @@ describe("health policy summary + decision counters", () => {
     expect(getDecisionCounters().abort).toBe(1);
 
     const denyRes = await handleRequest(
-      baseConfig({ destinations: { "0x1111111111111111111111111111111111111111": {} } }),
+      baseConfig({ destinations: { "0x1111111111111111111111111111111111111111": { type: "eoa" } } }),
       {
         jsonrpc: "2.0",
         id: 2,

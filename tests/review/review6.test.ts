@@ -144,14 +144,20 @@ describe("N-L2-2: a reducing call to a listed destination keeps that destination
   });
 
   it("RR-7b a destination with maxNativeWei 0.01 ETH does not accept 0.05 ETH carried on approve(x,0)", async () => {
-    const p = basePolicy({ destinations: { [ALLOWED]: { maxNativeWei: (ETH / 100n).toString() } } });
+    const p = basePolicy({ destinations: { [ALLOWED]: { maxNativeWei: (ETH / 100n).toString(), allowAnySelector: true } } });
     const v = await judge(p, { to: ALLOWED, value: ETH / 20n, data: a0 });
     expect(v.allow).toBe(false);
     if (!v.allow) expect(v.code).toBe("OVER_CAP");
   });
 
-  it("control: approve(x,0) to a destination with no selector list and no value is still allowed", async () => {
-    const p = basePolicy({ destinations: { [ALLOWED]: {} } });
+  it("control: approve(x,0) with no value to a destination with allowAnySelector is allowed", async () => {
+    const p = basePolicy({ destinations: { [ALLOWED]: { allowAnySelector: true } } });
     expect((await judge(p, { to: ALLOWED, data: a0 })).allow).toBe(true);
+  });
+
+  it("approve(x,0) to a destination declared type eoa is denied (calldata to a value-only destination)", async () => {
+    const p = basePolicy({ destinations: { [ALLOWED]: { type: "eoa" } } });
+    const v = await judge(p, { to: ALLOWED, data: a0 });
+    expect(v).toMatchObject({ allow: false, code: "SELECTOR_NOT_ALLOWED" });
   });
 });

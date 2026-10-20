@@ -30,7 +30,7 @@ export function migrateLegacyPolicy(old: Legacy): { policy: Record<string, unkno
   if (old.humanGate?.notifyUrl) notes.push("humanGate.notifyUrl: set L2SG_ALERT_WEBHOOK (bypass alerts); denials are in the decision log");
   if (old.humanGate?.mode && old.humanGate.mode !== "stop") notes.push(`humanGate.mode=${old.humanGate.mode} is gone; denials always stop`);
 
-  const destinations: Record<string, { maxNativeWei?: string; note?: string }> = {};
+  const destinations: Record<string, { maxNativeWei?: string; type?: "eoa"; note?: string }> = {};
   // 0.x refused sends to requireApproval destinations, so 1.0 must not allow them. If any listing
   // (base or a chain overlay) required approval, the address is left out entirely.
   const held = new Set<string>();
@@ -48,10 +48,10 @@ export function migrateLegacyPolicy(old: Legacy): { policy: Record<string, unkno
       if (prev && prev.maxNativeWei !== cap) {
         notes.push(`${a} has different caps per chain; kept the lower one`);
         const lower = [prev.maxNativeWei, cap].filter((x): x is string => x !== undefined).map(BigInt).sort((x, y) => (x < y ? -1 : 1))[0];
-        destinations[key] = lower !== undefined ? { maxNativeWei: lower.toString() } : {};
+        destinations[key] = lower !== undefined ? { maxNativeWei: lower.toString(), type: "eoa" } : { type: "eoa" };
         continue;
       }
-      destinations[key] = cap !== undefined ? { maxNativeWei: cap } : {};
+      destinations[key] = cap !== undefined ? { maxNativeWei: cap, type: "eoa" } : { type: "eoa" };
     }
   };
   add(old.destinations, "");
@@ -73,6 +73,11 @@ export function migrateLegacyPolicy(old: Legacy): { policy: Record<string, unkno
     if (o.allowAnyDestination) notes.push(`chains.${chainKey}.allowAnyDestination has no 1.0 equivalent`);
     const c = wei(o.globalMaxNativeWei, o.globalMaxNativeEth);
     if (c !== undefined) maxPerTx = maxPerTx === undefined || BigInt(c) < BigInt(maxPerTx) ? c : maxPerTx;
+  }
+  if (Object.keys(destinations).length > 0) {
+    notes.push(
+      'destinations are written as "type": "eoa" (plain ETH transfers only). For a contract you call, replace it with a "selectors" list of the functions the agent may call'
+    );
   }
   if (old.erc20RecipientCheck !== false) {
     notes.push('ERC-20 transfers now need a "tokens" entry per token (recipients and caps); none were generated');

@@ -80,18 +80,46 @@ export function parsePolicy(json: unknown, source = "policy"): Policy {
   only(native, ["maxPerTxWei", "windowMaxWei"], `${source}.native`);
 
   const destinations = new Map<string, DestinationRule>();
+  const missingSelectors: string[] = [];
   for (const [k, v] of Object.entries(obj(root.destinations, `${source}.destinations`))) {
     const where = `${source}.destinations.${k}`;
     const key = addr(k, where);
     if (destinations.has(key)) fail(where, "listed twice (addresses are case-insensitive)");
     const d = obj(v, where);
-    only(d, ["maxNativeWei", "selectors", "note"], where);
+    only(d, ["maxNativeWei", "selectors", "allowAnySelector", "type", "note"], where);
     const rule: DestinationRule = { maxNativeWei: amount(d.maxNativeWei, `${where}.maxNativeWei`) };
+    if (d.type !== undefined && d.type !== "eoa" && d.type !== "contract") fail(`${where}.type`, 'must be "eoa" or "contract"');
+    if (d.allowAnySelector !== undefined && typeof d.allowAnySelector !== "boolean") fail(`${where}.allowAnySelector`, "must be a boolean");
+    if (d.selectors === "*") {
+      fail(`${where}.selectors`, 'must be an array. To allow every function on this destination, remove "selectors" and set "allowAnySelector": true');
+    }
     if (d.selectors !== undefined) {
       if (!Array.isArray(d.selectors)) fail(`${where}.selectors`, "must be an array");
       rule.selectors = new Set(d.selectors.map((s, i) => selector(s, `${where}.selectors[${i}]`)));
     }
+    if (d.allowAnySelector === true) {
+      if (rule.selectors) fail(where, 'has both "selectors" and "allowAnySelector": true. Keep one');
+      rule.anySelector = true;
+    }
+    if (d.type === "eoa") {
+      if (rule.selectors || rule.anySelector) {
+        fail(where, 'is "type": "eoa" (plain ETH transfers only), so it takes no "selectors" or "allowAnySelector". Drop the type if it is a contract');
+      }
+      rule.eoa = true;
+    } else if (!rule.selectors && !rule.anySelector) {
+      missingSelectors.push(key);
+    }
     destinations.set(key, rule);
+  }
+  if (missingSelectors.length > 0) {
+    fail(
+      `${source}.destinations`,
+      `${missingSelectors.length === 1 ? "this destination has" : `these ${missingSelectors.length} destinations have`} no "selectors" list: ` +
+        `${missingSelectors.join(", ")}. Every destination must say which functions may be called on it (fail closed). ` +
+        'For each: list them in "selectors" (["0x"] allows plain ETH transfers); ' +
+        'or, for a plain account that only receives ETH, set "type": "eoa"; ' +
+        'or, to allow every function on purpose, set "allowAnySelector": true (a warning is printed at startup)'
+    );
   }
 
   const tokens = new Map<string, TokenRule>();
@@ -181,6 +209,22 @@ export function loadPolicyFile(path: string): Policy {
     throw new PolicyError(`policy file ${path} is not valid JSON: ${(err as Error).message}`);
   }
   return parsePolicy(json, path);
+}
+
+/**
+ * Loud warnings for the policy's explicit opt-outs from function lists. The CLI prints these at
+ * startup and in check-policy; library users should log them too.
+ */
+export function selectorWarnings(policy: Policy): string[] {
+  const out: string[] = [];
+  for (const [d, r] of policy.destinations) {
+    if (r.anySelector) {
+      out.push(
+        `destination ${d} has "allowAnySelector": true. ANY function on it may be called, including ones that move or approve funds. List its functions in "selectors" instead unless you mean this`
+      );
+    }
+  }
+  return out;
 }
 
 export function permit2For(policy: Policy, chainId: number | undefined): string {

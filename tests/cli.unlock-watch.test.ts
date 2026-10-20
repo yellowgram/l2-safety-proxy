@@ -74,7 +74,7 @@ describe("receive watch in serve", () => {
       }
       return null;
     });
-    const policy = parsePolicy({ destinations: { [PAYEE]: {} } });
+    const policy = parsePolicy({ destinations: { [PAYEE]: { type: "eoa" } } });
     const store = new MemoryStore();
     const config = {
       chains: { "arb-sepolia": { id: "arb-sepolia", name: "Arbitrum Sepolia", chainId: 421614, upstreamRpcUrl: url, preferSimulateV1: true, ecosystem: "arbitrum" } },

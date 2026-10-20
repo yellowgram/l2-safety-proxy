@@ -58,13 +58,17 @@ addresses. Amounts are decimal strings in raw units (wei, or the token's smalles
 agent pay one address up to 0.05 ETH at a time and 0.2 ETH a day, and send it up to 250 USDC at a time and
 1,000 a day. Everything else is refused.
 
+The payee is `"type": "eoa"`: a plain account that receives ETH, so no call with calldata may go to it. Every
+contract you call needs a `"selectors"` list of the functions the agent may call on it (see
+[`policy.agent.example.json`](./policy.agent.example.json)). A destination with neither is refused at startup.
+
 ```json
 {
   "chains": [84532],
   "window": { "seconds": 86400 },
   "native": { "maxPerTxWei": "50000000000000000", "windowMaxWei": "200000000000000000" },
   "destinations": {
-    "0xYourPayee…": { "maxNativeWei": "50000000000000000" }
+    "0xYourPayee…": { "type": "eoa", "maxNativeWei": "50000000000000000" }
   },
   "tokens": {
     "0x036CbD53842c5426634e7929541eC2318f3dCF7e": {
@@ -257,9 +261,15 @@ close the gap:
 **Other limits, stated plainly:**
 
 - **Calls it can't see into.** It decodes the wrappers listed above. A call to an allowlisted contract with
-  calldata it doesn't decode is judged only by that destination's rule (and its `selectors` list, if you set
-  one). Allowlisting a general-purpose router or a smart account you don't control lets it do whatever that
-  contract does. Use `selectors` to narrow it.
+  calldata it doesn't decode is judged by that destination's `selectors` list: only the functions you list
+  may be called, and a destination without a list takes no calldata at all (`SELECTORS_REQUIRED`). Within a
+  listed function, the guard doesn't know what the contract does with the arguments: listing a general-purpose
+  router's `swap` lets the agent swap through it. `"allowAnySelector": true` lifts the function list for one
+  destination; it is printed as a warning at startup and in `check-policy`, and is rarely what you want.
+- **Contract or account.** The guard is offline and never asks the chain whether an address has code (code can
+  appear later through CREATE2 or an EIP-7702 delegation). Calldata decides: a send with empty calldata is a
+  plain transfer and needs no function list; anything with calldata needs one. A plain transfer to a contract
+  still runs its `receive`/fallback code (WETH's deposits, for example), so cap it with `maxNativeWei`.
 - **Swaps.** Universal Router commands are checked for recipients (the output must go to the sender or a listed
   recipient); unknown commands are refused. Prices and slippage are not checked, and the amount a swap spends
   is bounded only by the token approvals the router (or Permit2) holds. Keep those approvals capped.
@@ -334,7 +344,7 @@ Commands:
 ```
 l2-send-guard [serve]                          start the proxy
 l2-send-guard check-policy <file>              validate a policy and print a summary and warnings
-l2-send-guard migrate-policy <0.x-file>        print the 1.0 form of a 0.x policy file
+l2-send-guard migrate-policy <0.x-file>        print the current form of a 0.x policy file
 l2-send-guard unlock <address> --chain <id>    clear a bypass lock (stop the proxy first if you use the file store)
 ```
 
@@ -349,6 +359,41 @@ curl http://127.0.0.1:8545/health
 The compose file publishes the port on `127.0.0.1` only and keeps state in a volume.
 
 ## Migrating
+
+### From l2-send-guard 1.x to 2.0
+
+2.0 makes contract destinations fail closed. In 1.x a destination without `selectors` allowed every function
+on it, so allowlisting a DEX router allowed its admin and sweep functions too. In 2.0:
+
+- Every destination must say what may be sent to it. The proxy refuses to start, and `check-policy` fails,
+  naming every destination that doesn't. For each one, add one of:
+  - `"selectors": [...]`: the functions the agent may call (4-byte selectors or signatures; `"0x"` also allows
+    plain ETH transfers). Use this for every contract, including Multicall3 and routers you call through.
+  - `"type": "eoa"`: a plain account that only receives ETH. Calls with calldata to it are refused.
+  - `"allowAnySelector": true`: every function, as in 1.x. Only if you really mean it: it prints a `WARNING` at
+    startup and in `check-policy`.
+- A call with calldata to a destination that has no function list is refused with the new code
+  `SELECTORS_REQUIRED`. This only arises for policies built in code; a policy file can't load without a list.
+- Calldata of one to three bytes is no longer treated as a plain transfer, so `"0x"` in `selectors` no longer
+  covers it (it runs the contract's fallback).
+- ETH sent along with a token call (`transfer`, `approve`, …) must be allowed by the token's own destination
+  entry, its `selectors` and `maxNativeWei`. Before, any listing of the token as a destination was enough.
+- `migrate-policy` writes 0.x destinations as `"type": "eoa"`. Replace that with a `selectors` list for any
+  contract you call.
+- Library: `selectorWarnings(policy)` returns the warnings for `allowAnySelector` destinations; log them if you
+  load policies yourself. `DestinationRule` has new optional fields `anySelector` and `eoa`.
+
+A 1.x entry such as
+
+```json
+"0xRouter…": { "maxNativeWei": "0" }
+```
+
+becomes, for a router the agent swaps through,
+
+```json
+"0xRouter…": { "maxNativeWei": "0", "selectors": ["execute(bytes,bytes[],uint256)"] }
+```
 
 ### From l2-send-guard 0.x
 

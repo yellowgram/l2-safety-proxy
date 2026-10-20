@@ -42,7 +42,11 @@ await new Promise((r) => upstream.listen(0, "127.0.0.1", r));
 const policy = parsePolicy({
   window: { seconds: 3600 },
   native: { maxPerTxWei: parseEther("0.1").toString(), windowMaxWei: parseEther("0.5").toString() },
-  destinations: { [PAYEE]: {}, [MULTICALL3]: {}, [REVERTS]: {} },
+  destinations: {
+    [PAYEE]: { type: "eoa" },
+    [MULTICALL3]: { selectors: ["aggregate3((address,bool,bytes)[])"] },
+    [REVERTS]: { selectors: ["0x"] },
+  },
   tokens: { [TOKEN]: { approve: { spenders: [PAYEE], maxAmountRaw: "1000000" } } },
 });
 const config = {

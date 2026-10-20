@@ -216,6 +216,7 @@ const HINTS: Record<string, string> = {
   METHOD_NOT_GATED: "This method submits transactions in a way the guard can't check. Use eth_sendRawTransaction.",
   INTERNAL_ERROR: "The guard hit an unexpected error while checking this transaction, so it refused to send. Please report it with the decision log entry.",
   REPLAYABLE_TX: "Sign the transaction with a chain id (EIP-155 or a typed transaction).",
+  SELECTORS_REQUIRED: 'This destination has no "selectors" list, so no function on it may be called. Add the function to its "selectors" in the policy.',
 };
 
 /**

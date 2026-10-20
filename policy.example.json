@@ -12,10 +12,8 @@
   "destinations": {
     "0x1111111111111111111111111111111111111111": {
       "note": "payroll wallet",
-      "maxNativeWei": "50000000000000000",
-      "selectors": [
-        "0x"
-      ]
+      "type": "eoa",
+      "maxNativeWei": "50000000000000000"
     }
   },
   "tokens": {

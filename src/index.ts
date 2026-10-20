@@ -5,7 +5,7 @@
  *
  *   l2-send-guard [serve]                      start the proxy (env: see README)
  *   l2-send-guard check-policy <file>          validate a policy file and summarize it
- *   l2-send-guard migrate-policy <0.x file>    print the 1.0 version of a 0.x policy file
+ *   l2-send-guard migrate-policy <0.x file>    print the current form of a 0.x policy file
  *   l2-send-guard unlock <address> --chain <id> clear a bypass lock (uses L2SG_STORE)
  */
 import { readFileSync } from "node:fs";
@@ -14,7 +14,7 @@ import { loadChainsOnly, loadConfig, parseStoreSpec, readPolicyFile } from "./co
 import { createGuardFromConfig, openStore, rpcReader, startWatch } from "./config/guard.js";
 import { migrateLegacyPolicy } from "./config/migrate.js";
 import { Guard } from "./guard/guard.js";
-import { parsePolicy } from "./guard/policy/load.js";
+import { parsePolicy, selectorWarnings } from "./guard/policy/load.js";
 import type { Policy } from "./guard/policy/types.js";
 import { listen } from "./proxy/server.js";
 import { PACKAGE_VERSION } from "./version.js";
@@ -23,7 +23,7 @@ const USAGE = `l2-send-guard ${PACKAGE_VERSION}
 usage:
   l2-send-guard [serve]                         start the proxy
   l2-send-guard check-policy <file>             validate a policy file and summarize it
-  l2-send-guard migrate-policy <0.x-file>       print the 1.0 form of a 0.x policy file
+  l2-send-guard migrate-policy <0.x-file>       print the current form of a 0.x policy file
   l2-send-guard unlock <address> --chain <id>   clear a bypass lock in L2SG_STORE`;
 
 function die(msg: string): never {
@@ -31,21 +31,21 @@ function die(msg: string): never {
   process.exit(1);
 }
 
+const anyCount = (p: Policy) => [...p.destinations.values()].filter((r) => r.anySelector).length;
+
 export function summarizePolicy(p: Policy): { summary: string[]; warnings: string[] } {
   const summary = [
     `chains: ${p.chains.size ? [...p.chains].join(", ") : "any"}`,
-    `destinations: ${p.destinations.size}`,
+    `destinations: ${p.destinations.size}${anyCount(p) ? ` (${anyCount(p)} with allowAnySelector)` : ""}`,
     `tokens: ${p.tokens.size}`,
     `native: per tx ${p.native.maxPerTxWei ?? "no cap"} wei, per ${p.windowSeconds}s ${p.native.windowMaxWei ?? "no cap"} wei`,
     `7702 delegation: ${p.delegation.mode}${p.delegation.mode === "allowlist" ? ` (${p.delegation.delegates.size})` : ""}`,
     `contract creation: ${p.allowContractCreation ? "allowed" : "denied"}`,
   ];
-  const warnings: string[] = [];
+  // The loud ones first: explicit opt-outs from a destination's function list.
+  const warnings: string[] = selectorWarnings(p);
   if (p.destinations.size === 0 && p.tokens.size === 0) warnings.push("no destinations or tokens: every send will be denied");
   if (p.native.maxPerTxWei === undefined && p.native.windowMaxWei === undefined) warnings.push("no native caps: allowed destinations can receive any amount");
-  for (const [d, r] of p.destinations) {
-    if (!r.selectors) warnings.push(`destination ${d}: any function may be called on it (set selectors to restrict)`);
-  }
   for (const [t, r] of p.tokens) {
     if (r.transfer.maxAmountRaw === undefined && r.windowMaxAmountRaw === undefined && r.transfer.recipients.size > 0) {
       warnings.push(`token ${t}: transfers have no per-tx or rolling cap`);
@@ -53,7 +53,7 @@ export function summarizePolicy(p: Policy): { summary: string[]; warnings: strin
   }
   for (const t of p.tokens.keys()) {
     const d = p.destinations.get(t);
-    if (d && !d.selectors) warnings.push(`token ${t} is also a destination with no selectors: functions the guard doesn't decode (e.g. transferWithAuthorization) are allowed on it`);
+    if (d?.anySelector) warnings.push(`token ${t} is also a destination with "allowAnySelector": true: functions the guard doesn't decode (e.g. transferWithAuthorization) are allowed on it`);
   }
   if (p.typedData.allowUnknown) warnings.push("typedData.allowUnknown: the guarded signer will sign typed data it can't check");
   return { summary, warnings };
@@ -79,7 +79,7 @@ async function main(argv: string[]): Promise<void> {
     }
     const { summary, warnings } = summarizePolicy(p);
     console.log(`${rest[0]}: valid\n  ${summary.join("\n  ")}`);
-    for (const w of warnings) console.log(`  warning: ${w}`);
+    for (const w of warnings) console.log(`  ${w.includes("allowAnySelector") ? "WARNING" : "warning"}: ${w}`);
     return;
   }
   if (cmd === "migrate-policy") {
@@ -128,6 +128,7 @@ async function main(argv: string[]): Promise<void> {
   } catch (err) {
     die(`refusing to start: ${(err as Error).message}`);
   }
+  for (const w of config.guardSpec ? selectorWarnings(config.guardSpec.policy) : []) console.error(`[l2-send-guard] WARNING: ${w}`);
   const server = listen(config);
   const stopWatch = startWatch(config);
   server.on("close", stopWatch);

@@ -85,7 +85,7 @@ function buildConfig(fixture: EvalFixture): GuardConfig {
   const guard =
     fixture.policyAllowlist !== undefined
       ? new Guard({
-          policy: parsePolicy({ destinations: Object.fromEntries(fixture.policyAllowlist.map((a) => [a, {}])) }),
+          policy: parsePolicy({ destinations: Object.fromEntries(fixture.policyAllowlist.map((a) => [a, { type: "eoa" }])) }),
           store: new MemoryStore(),
         })
       : undefined;

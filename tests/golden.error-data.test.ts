@@ -131,7 +131,7 @@ describe("golden error.data shape", () => {
 
   it("-32083 TX_UNPARSEABLE when policy is on and the raw tx does not parse", async () => {
     const cfg = config();
-    cfg.guard = guardWith({ destinations: { "0x0000000000000000000000000000000000000001": {} } });
+    cfg.guard = guardWith({ destinations: { "0x0000000000000000000000000000000000000001": { type: "eoa" } } });
     const simulate = vi.fn();
     const forward = vi.fn();
     const res = await handleRequest(

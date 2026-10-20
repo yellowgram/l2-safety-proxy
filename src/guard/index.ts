@@ -4,7 +4,7 @@ export { parseSignedTx, TxParseError, type Authorization, type SignedTx } from "
 export { checkTypedData } from "./typed.js";
 export { flattenCalls, DecodeDenied, type Leaf } from "./calls.js";
 export { evaluateTx, type TxInput } from "./policy/evaluate.js";
-export { parsePolicy, loadPolicyFile, PolicyError, permit2For } from "./policy/load.js";
+export { parsePolicy, loadPolicyFile, PolicyError, permit2For, selectorWarnings } from "./policy/load.js";
 export type { Policy, DestinationRule, TokenRule, Verdict, DenyCode, Spend } from "./policy/types.js";
 export { classifyLog, scanOnce, watchInbound, maySpend, reclassify, looksLike, trustedAddresses, TOPICS, type Finding, type ReceiveRules, type WatchOptions } from "./receive/index.js";
 export { MemoryStore } from "./store/memory.js";

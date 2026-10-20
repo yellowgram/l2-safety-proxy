@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { GuardConfig, SimResult } from "../../src/types/index.js";
-import { AGENT, ALLOWED, ATTACKER, CHAIN, ETH, MULTICALL3, SAFE, TOKEN, basePolicy, sign } from "../guard/helpers.js";
+import { AGENT, ALLOWED, ATTACKER, CHAIN, ETH, MULTICALL3, MULTICALL3_SELECTORS, SAFE, TOKEN, basePolicy, sign } from "../guard/helpers.js";
 
 const judge = async (p: ReturnType<typeof basePolicy>, tx: Parameters<typeof sign>[0]) =>
   evaluateTx(p, await parseSignedTx(await sign(tx)), { chainId: CHAIN, now: 1_000_000 });
@@ -32,7 +32,7 @@ const addOwner = encodeFunctionData({ abi, functionName: "addOwnerAddress", args
 const exec = (target: Address, value: bigint, data: Hex) => encodeFunctionData({ abi, functionName: "execute", args: [target, value, data] });
 // The agent lists its own 7702 EOA as a destination. The load check refuses an accounts[] entry that is
 // also a destination, but it can't know the sender, so this policy loads.
-const selfListed = () => basePolicy({ destinations: { [ALLOWED]: {}, [MULTICALL3]: {}, [AGENT]: {} }, accounts: [SAFE] });
+const selfListed = () => basePolicy({ destinations: { [ALLOWED]: { type: "eoa" }, [MULTICALL3]: { selectors: MULTICALL3_SELECTORS }, [AGENT]: { allowAnySelector: true } }, accounts: [SAFE] });
 
 describe("own-account calls that are not wrappers are denied, even when the account is a listed destination", () => {
   it("upgradeToAndCall on the sender's own (7702) account", async () => {
@@ -58,7 +58,8 @@ describe("own-account calls that are not wrappers are denied, even when the acco
 describe("R5-acctonly: execute(...) on someone else's contract is one ordinary call on that contract", () => {
   it("execute(target, value, data) on a listed non-account destination is judged as a call on that destination, not unpacked", async () => {
     // Unpacking it would judge ATTACKER as if the agent called it (it does not: the contract does).
-    const v = await judge(basePolicy(), { to: ALLOWED, data: exec(ATTACKER, 0n, "0x") });
+    const p = basePolicy({ destinations: { [ALLOWED]: { selectors: ["execute(address,uint256,bytes)"] } } });
+    const v = await judge(p, { to: ALLOWED, data: exec(ATTACKER, 0n, "0x") });
     expect(v.allow, v.reason).toBe(true);
   });
   it("the same execute on the agent's own account is unpacked, so its inner call is judged", async () => {
@@ -112,20 +113,41 @@ async function checkPolicy(policy: unknown): Promise<string> {
   const { stdout } = await run(process.execPath, [join("node_modules", "tsx", "dist", "cli.mjs"), "src/index.ts", "check-policy", f], { timeout: 20_000 });
   return stdout;
 }
+async function checkPolicyExit(policy: unknown): Promise<{ code: number; stdout: string; stderr: string }> {
+  const f = join(mkdtempSync(join(tmpdir(), "l2sg-cp-")), "policy.json");
+  writeFileSync(f, JSON.stringify(policy));
+  try {
+    const { stdout, stderr } = await run(process.execPath, [join("node_modules", "tsx", "dist", "cli.mjs"), "src/index.ts", "check-policy", f], { timeout: 20_000 });
+    return { code: 0, stdout, stderr };
+  } catch (err) {
+    const e = err as { code: number; stdout: string; stderr: string };
+    return { code: e.code, stdout: e.stdout, stderr: e.stderr };
+  }
+}
 const minimal = (destinations: Record<string, unknown>) => ({
   window: { seconds: 3600 }, native: { maxPerTxWei: "1", windowMaxWei: "2" }, destinations,
   tokens: { [TOKEN]: { transfer: { recipients: [ALLOWED], maxAmountRaw: "1" } } },
 });
 
-describe("check-policy warnings", () => {
-  it("warns about a destination with no selectors, and a token that is also an unrestricted destination", async () => {
-    const out = await checkPolicy(minimal({ [ALLOWED]: {}, [TOKEN]: {} }));
-    expect(out).toContain(`warning: destination ${ALLOWED.toLowerCase()}: any function may be called on it (set selectors to restrict)`);
-    expect(out).toContain(`warning: token ${TOKEN.toLowerCase()} is also a destination with no selectors`);
+describe("check-policy and selectors", () => {
+  it("refuses a policy with destinations lacking selectors, naming every one", async () => {
+    const r = await checkPolicyExit(minimal({ [ALLOWED]: {}, [TOKEN]: { maxNativeWei: "1" }, [ATTACKER]: { type: "eoa" } }));
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`these 2 destinations have no "selectors" list: ${ALLOWED.toLowerCase()}, ${TOKEN.toLowerCase()}`);
+    expect(r.stderr).not.toContain(ATTACKER.toLowerCase());
+  }, 30_000);
+  it("prints a loud WARNING for allowAnySelector, and for a token that is also such a destination", async () => {
+    const out = await checkPolicy(minimal({ [ALLOWED]: { allowAnySelector: true }, [TOKEN]: { allowAnySelector: true } }));
+    expect(out).toContain("valid");
+    expect(out).toContain("destinations: 2 (2 with allowAnySelector)");
+    expect(out).toContain(`WARNING: destination ${ALLOWED.toLowerCase()} has "allowAnySelector": true. ANY function on it may be called`);
+    expect(out).toContain(`token ${TOKEN.toLowerCase()} is also a destination with "allowAnySelector": true`);
   }, 30_000);
   it("no such warning once selectors are set", async () => {
-    const out = await checkPolicy(minimal({ [ALLOWED]: { selectors: ["0xa9059cbb"] } }));
+    const out = await checkPolicy(minimal({ [ALLOWED]: { selectors: ["0xa9059cbb"] }, [ATTACKER]: { type: "eoa" }, [TOKEN]: { type: "eoa" } }));
     expect(out).toContain("valid");
-    expect(out).not.toContain(`warning: destination ${ALLOWED.toLowerCase()}`);
+    expect(out).not.toContain("WARNING");
+    expect(out).not.toContain("is also a destination");
+    expect(out).not.toContain("allowAnySelector");
   }, 30_000);
 });

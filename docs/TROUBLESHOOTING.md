@@ -9,6 +9,7 @@ It refuses to start rather than run with a weaker setup than you asked for. The 
 | `no policy` | Set `L2SG_POLICY_FILE=./policy.json`, or `L2SG_POLICY=off` for simulation only |
 | `is a 0.x policy file` | `npx l2-send-guard migrate-policy old.json > policy.json`, then review it |
 | `L2SG_POLICY_ENABLED` or another `L2SG_POLICY_*` | Removed in 1.0: move the rules into the policy file |
+| `no "selectors" list` | Since 2.0 every destination needs one. Add `"selectors": [...]` for a contract, `"type": "eoa"` for a plain account, or (on purpose only) `"allowAnySelector": true`. See [POLICY.md](./POLICY.md#contract-destinations) |
 | `unknown chain` | Check the spelling in `L2SG_CHAINS` (`arb-sepolia`, `op-sepolia`, `base-sepolia`, `ethereum`, `arbitrum`, `optimism`, `base`, `sepolia`) |
 | `no public default RPC` | Mainnets need `L2SG_RPC_<NAME>`, e.g. `L2SG_RPC_BASE` |
 | `store … is in use by process` | Another proxy uses the same state file. Use one file per process, or Postgres for several |
@@ -22,6 +23,8 @@ e.g. `tx>aggregate3[1]` is the second call inside a Multicall3. [POLICY.md](./PO
 the codes. The usual causes:
 
 - `DESTINATION_NOT_ALLOWED` for a contract you call through: the wrapper (Multicall3, a router) must be a destination too.
+- `SELECTOR_NOT_ALLOWED`: the function isn't in that destination's `selectors` (for a router's `multicall`, each
+  entry's function must be listed too), or the destination is `"type": "eoa"` and the send has calldata.
 - `TOKEN_NOT_ALLOWED`: token calls are judged under `tokens`, not `destinations`. Add a `tokens` entry.
 - `APPROVAL_OVER_CAP` with "(none set)": `approve.maxAmountRaw` is required for any approval.
 - `CHAIN_NOT_ALLOWED`: the chain id isn't in `chains`.

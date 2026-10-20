@@ -61,7 +61,7 @@ describe("destinations and native value", () => {
 
 describe("ERC-20 calldata on an allowed contract (audit 1d)", () => {
   it("denies transfer(attacker, 2^255) even when the token contract is an allowed destination", async () => {
-    const p = basePolicy({ destinations: { [TOKEN]: {} }, tokens: {} });
+    const p = basePolicy({ destinations: { [TOKEN]: { allowAnySelector: true } }, tokens: {} });
     const data = encodeFunctionData({ abi: erc20, functionName: "transfer", args: [ATTACKER, 2n ** 255n] });
     expect((await judge(p, { to: TOKEN, data })).code).toBe("TOKEN_NOT_ALLOWED");
   });

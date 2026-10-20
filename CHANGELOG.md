@@ -1,6 +1,44 @@
 # Changelog
 
-## Unreleased
+## 2.0.0
+
+Contract destinations are fail closed. In 1.x a destination without a `selectors` list allowed every function
+on it, so allowlisting a contract such as a DEX router allowed all of its functions, not just the swap. See
+[README#migrating](./README.md#from-l2-send-guard-1x-to-20) for the upgrade steps.
+
+### Breaking
+
+- Every entry in `destinations` must have a `selectors` list, `"type": "eoa"` (a plain account: ETH transfers
+  only), or `"allowAnySelector": true`. A policy with an entry that has none of these doesn't load: the proxy
+  refuses to start and `check-policy` fails, and the error names every such destination at once.
+- A call with calldata to a destination without a function list is refused with the new deny code
+  `SELECTORS_REQUIRED` (a policy built in code can still have such an entry). Plain ETH transfers with empty
+  calldata need no list.
+- A call with calldata to a `"type": "eoa"` destination is refused (`SELECTOR_NOT_ALLOWED`).
+- Calldata of one to three bytes is no longer treated as a plain transfer: `"0x"` in `selectors` doesn't cover it.
+- ETH sent along with a token call must be allowed by the token's own destination entry (`selectors` and
+  `maxNativeWei`). Before, any listing of the token as a destination was enough.
+- `migrate-policy` writes 0.x destinations as `"type": "eoa"`, with a note to add `selectors` for contracts.
+- `"selectors": "*"` is refused with a pointer to `allowAnySelector`.
+
+### Added
+
+- `"allowAnySelector": true` per destination: the explicit opt-in to allow every function. The proxy prints a
+  `WARNING` line for each such destination at startup, and `check-policy` prints it and counts them in its
+  summary.
+- `"type": "eoa"` per destination (`"contract"` is also accepted and is the default).
+- `selectorWarnings(policy)` in the library, for callers that load policies themselves.
+- A `hint` for `SELECTORS_REQUIRED` in `error.data`.
+
+### Changed
+
+- `check-policy` no longer warns "any function may be called" about destinations without `selectors`, since such
+  a policy no longer loads. The warning about a token that is also an unrestricted destination now applies to
+  `allowAnySelector` entries.
+- The offline demo, the evaluation harness and every example policy declare a function list or `"type": "eoa"`
+  for each destination.
+
+### Other
 
 - Tests: Panic `0x22` (storage encoding error) is in the revert-decode table. Thanks @littfed (#14).
 - Docs: the README lists every `/health` `policy` and `decisions` field. Thanks @wufangyong973 (#21).

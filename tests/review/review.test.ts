@@ -22,7 +22,7 @@ async function judge(policy: ReturnType<typeof basePolicy>, tx: Parameters<typeo
 
 describe("review: evaluate", () => {
   it("PROBE-1 per-destination maxNativeWei holds when the call is wrapped in the destination's own multicall", async () => {
-    const p = basePolicy({ destinations: { [ROUTER]: { maxNativeWei: (ETH / 100n).toString() } } });
+    const p = basePolicy({ destinations: { [ROUTER]: { maxNativeWei: (ETH / 100n).toString(), selectors: ["deposit()", "multicall(bytes[])"] } } });
     // plain call over the per-destination cap: denied (control)
     expect((await judge(p, { to: ROUTER, value: ETH / 20n, data: deposit })).allow).toBe(false);
     // same value, same router, same inner call, wrapped in multicall(bytes[])

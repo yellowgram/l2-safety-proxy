@@ -3,7 +3,7 @@ import { EFFECTIVELY_UNLIMITED, NonCanonicalAbi, UINT160_MAX, decodeKnown, selec
 import { DecodeDenied, flattenCalls, type Leaf } from "../calls.js";
 import type { Authorization } from "../tx.js";
 import { permit2For } from "./load.js";
-import type { DenyCode, Policy, Spend, TokenRule, Verdict } from "./types.js";
+import type { DenyCode, DestinationRule, Policy, Spend, TokenRule, Verdict } from "./types.js";
 
 export interface TxInput {
   from?: Address;
@@ -81,13 +81,7 @@ function run(policy: Policy, tx: TxInput, opts: EvaluateOptions, spend: Spend) {
   for (const w of flat.wrappers) {
     const t = lc(w.to);
     if (t === sender || policy.accounts.has(t)) continue;
-    const rule = destination(policy, t, w.path, opts.poisoned);
-    if (rule.selectors && !rule.selectors.has(w.selector)) {
-      throw new Deny("SELECTOR_NOT_ALLOWED", `function ${w.selector} (${w.name}) on ${t} is not in its allowed selectors`, w.path);
-    }
-    if (rule.maxNativeWei !== undefined && w.value > rule.maxNativeWei) {
-      throw new Deny("OVER_CAP", `sends ${w.value} wei to ${t}; its cap is ${rule.maxNativeWei}`, w.path);
-    }
+    withinDestination(destination(policy, t, w.path, opts.poisoned), t, { data: w.selector, value: w.value }, w.path, w.name);
   }
 
   spend.native += tx.value;
@@ -189,11 +183,35 @@ function judgeLeaf(policy: Policy, leaf: Extract<Leaf, { kind: "call" }>, ctx: L
   withinDestination(destination(policy, to, path, ctx.poisoned), to, leaf, path);
 }
 
-/** A listed destination's own limits: its selectors (if set) and its maxNativeWei. */
-function withinDestination(rule: ReturnType<typeof destination>, to: string, leaf: { data: Hex; value: bigint }, path: string) {
-  const sel = selectorOf(leaf.data) ?? "0x";
-  if (rule.selectors && !rule.selectors.has(sel)) {
-    throw new Deny("SELECTOR_NOT_ALLOWED", `function ${sel} on ${to} is not in its allowed selectors`, path);
+/**
+ * A listed destination's own limits: which functions may be called on it, and its maxNativeWei.
+ *
+ * Fail closed: a call with calldata runs code at `to` (a contract, or an account with a 7702
+ * delegation), so it needs its selector in `selectors`, or the destination's explicit
+ * `allowAnySelector: true`. Without either it is denied. Only a plain value transfer (empty
+ * calldata) needs no list. Whether `to` is a contract is never looked up: the guard is offline,
+ * and code can appear at an address later (CREATE2, 7702), so calldata presence decides.
+ */
+function withinDestination(rule: DestinationRule, to: string, leaf: { data: Hex; value: bigint }, path: string, name?: string) {
+  if (!rule.anySelector) {
+    const plain = leaf.data.length <= 2;
+    const sel = plain ? "0x" : selectorOf(leaf.data);
+    const fn = `function ${sel ?? leaf.data}${name ? ` (${name})` : ""}`;
+    if (rule.selectors) {
+      if (sel === undefined) {
+        throw new Deny("SELECTOR_NOT_ALLOWED", `calldata ${leaf.data} to ${to} is shorter than a 4-byte selector (it would run the contract's fallback); not allowed`, path);
+      }
+      if (!rule.selectors.has(sel)) throw new Deny("SELECTOR_NOT_ALLOWED", `${fn} on ${to} is not in its allowed selectors`, path);
+    } else if (!plain) {
+      if (rule.eoa) {
+        throw new Deny("SELECTOR_NOT_ALLOWED", `${to} is declared "type": "eoa" (plain ETH transfers only), so ${fn} on it is denied`, path);
+      }
+      throw new Deny(
+        "SELECTORS_REQUIRED",
+        `${to} has no "selectors" list, so ${fn} on it is denied. List the functions it may be called with in "selectors", or set "allowAnySelector": true`,
+        path
+      );
+    }
   }
   if (rule.maxNativeWei !== undefined && leaf.value > rule.maxNativeWei) {
     throw new Deny("OVER_CAP", `sends ${leaf.value} wei to ${to}; its cap is ${rule.maxNativeWei}`, path);
@@ -258,7 +276,9 @@ function judgeToken(
   const { path } = leaf;
   const a = (i: number) => args[i] as string;
   const n = (i: number) => args[i] as bigint;
-  if (leaf.value > 0n) destination(policy, token, path, ctx.poisoned);
+  // ETH sent along with a token call reaches the token contract: it must be a listed destination
+  // whose own function list and maxNativeWei allow it.
+  if (leaf.value > 0n) withinDestination(destination(policy, token, path, ctx.poisoned), token, leaf, path);
   switch (signature) {
     case "transfer(address,uint256)":
       return transfer(policy, token, lc(a(0)), n(1), ctx, spend, path);

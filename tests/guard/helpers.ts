@@ -20,11 +20,23 @@ export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as Addres
 export const PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3" as Address;
 export const ETH = 10n ** 18n;
 
+export const MULTICALL3_SELECTORS = [
+  "aggregate((address,bytes)[])",
+  "tryAggregate(bool,(address,bytes)[])",
+  "aggregate3((address,bool,bytes)[])",
+  "aggregate3Value((address,bool,uint256,bytes)[])",
+];
+export const ROUTER_SELECTORS = ["execute(bytes,bytes[])", "execute(bytes,bytes[],uint256)", "multicall(bytes[])"];
+
 export function basePolicy(extra: Record<string, unknown> = {}) {
   return parsePolicy({
     window: { seconds: 3600 },
     native: { maxPerTxWei: (ETH / 10n).toString(), windowMaxWei: (ETH / 2n).toString() },
-    destinations: { [ALLOWED]: {}, [MULTICALL3]: {}, [ROUTER]: {} },
+    destinations: {
+      [ALLOWED]: { type: "eoa" },
+      [MULTICALL3]: { selectors: MULTICALL3_SELECTORS },
+      [ROUTER]: { selectors: ROUTER_SELECTORS },
+    },
     tokens: {
       [TOKEN]: {
         transfer: { recipients: [RECIPIENT], maxAmountRaw: "1000" },
