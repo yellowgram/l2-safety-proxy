@@ -13,9 +13,11 @@ export interface Policy {
   /**
    * calldataTag: what to do with the "unix" calldata tag after the arguments of a call to a
    * Universal Router 2.1 router (see routerCalldataTag): "strip" it before decoding (default) or
-   * "refuse" it like any other trailing bytes.
+   * "refuse" it like any other trailing bytes. Both are optional so a Policy built by hand in 2.0 still
+   * compiles: an omitted v4Hooks allows no hook, and an omitted calldataTag in a hand-built Policy means
+   * refuse; parsePolicy defaults it to strip.
    */
-  universalRouter: { recipients: Set<string>; v4Hooks: Set<string>; calldataTag: "strip" | "refuse" };
+  universalRouter: { recipients: Set<string>; v4Hooks?: Set<string>; calldataTag?: "strip" | "refuse" };
   allowContractCreation: boolean;
   typedData: { allowUnknown: boolean };
 }

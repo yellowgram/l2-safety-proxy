@@ -333,7 +333,9 @@ close the gap:
 
   Prices are still not checked: `amountOutMinimum` and `minHopPriceX36` are not judged, a v4 pool can have any
   fee, and a token on your list can be swapped for any token. Bound what a swap can spend with capped
-  approvals.
+  approvals. The `ROUTER_OUTPUT_STRANDED` check assumes an exact-input swap spends its whole `amountIn`. If a
+  pool runs out of liquidity (or a listed v4 hook changes the amounts), the unspent rest stays in the router.
+  Set `amountOutMinimum` so a partial fill reverts.
 - **Calldata size.** A transaction with more than 128 KiB of calldata is refused (`CALLDATA_TOO_LARGE`) before
   anything is decoded. ABI offsets and lengths are checked for the canonical layout before values are
   expanded, so crafted offsets can't make the proxy decode the same bytes over and over.
@@ -432,7 +434,8 @@ No policy changes are needed. What changes:
 - Calls to the official Universal Router 2.1.1 and 2.1.2 addresses on the built-in chains are read with the 2.1
   layout, so swaps built for them can pass (README, [limits](#threat-model-and-limits)). Calls to any other
   router are judged exactly as in 2.0. Calldata built for 2.0 and sent to a 2.1 router is now refused
-  (`NON_CANONICAL_ABI`); the router would revert on it anyway.
+  (`NON_CANONICAL_ABI`): a 2.1 router reads a sixth argument that 2.0 inputs don't have, so it misreads them
+  (in practice it reverts).
 - `V4_SWAP` on a 2.1 router is checked instead of refused. Pools with a hook are refused with the new code
   `ROUTER_V4_HOOK_NOT_ALLOWED` unless the hook is listed in the new policy key `universalRouter.v4Hooks`.
 - `executeSigned(bytes,bytes[],bytes32,bytes32,bool,bytes32,bytes,uint256)` is unpacked like `execute` on every

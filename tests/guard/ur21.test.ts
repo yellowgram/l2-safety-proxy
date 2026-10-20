@@ -16,6 +16,7 @@ import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, encodeFun
 import { evaluateTx } from "../../src/guard/policy/evaluate.js";
 import { UR_V2_1, UR_WETH, flattenCalls, routerCalldataTag, ur21Routers } from "../../src/guard/calls.js";
 import { parsePolicy, PolicyError } from "../../src/guard/policy/load.js";
+import type { Policy } from "../../src/guard/policy/types.js";
 import { parseSignedTx } from "../../src/guard/tx.js";
 import { Guard } from "../../src/guard/guard.js";
 import { MemoryStore } from "../../src/guard/store/memory.js";
@@ -115,6 +116,26 @@ describe("real Universal Router 2.1.2 transactions (tests/fixtures/ur21-onchain.
       if (f.suffix === "0x") expect(v, f.hash).toEqual(judgeFixture(f, f.input, base));
       else expect(v, f.hash).toMatchObject({ allow: false, code: "NON_CANONICAL_ABI" });
       expect(v.notes).toBeUndefined();
+    }
+  });
+
+  it("a Policy built by hand without v4Hooks and calldataTag (2.0 shape) compiles and fails closed", () => {
+    const hand = (f: Fixture): Policy => {
+      const p = fixturePolicy(f);
+      return { ...p, universalRouter: { recipients: p.universalRouter.recipients } };
+    };
+    const tagged = FIXTURES.filter((f) => f.suffix !== "0x" && !unlimitedPermit(f));
+    const hooked = FIXTURES.filter((f) => f.hooks.length > 0 && !unlimitedPermit(f));
+    expect(tagged.length).toBeGreaterThan(0);
+    expect(hooked.length).toBeGreaterThan(0);
+    for (const f of tagged) {
+      expect(judgeFixture(f, f.input), f.hash).not.toMatchObject({ code: "NON_CANONICAL_ABI" });
+      const v = judgeFixture(f, f.input, hand(f));
+      expect(v, f.hash).toMatchObject({ allow: false, code: "NON_CANONICAL_ABI" });
+      expect(v.notes).toBeUndefined();
+    }
+    for (const f of hooked) {
+      expect(judgeFixture(f, canonical(f), hand(f)), f.hash).toMatchObject({ allow: false, code: "ROUTER_V4_HOOK_NOT_ALLOWED" });
     }
   });
 
@@ -910,5 +931,35 @@ describe("through the proxy", () => {
       expect(refused.rec).toMatchObject({ decision: "policy_denied", policyCode: "NON_CANONICAL_ABI" });
       expect(refused.rec).not.toHaveProperty("notes");
     });
+  });
+});
+
+// LaunchGate L2V21 probes: each pins a mutant the rest of the suite let through (M14, M28, M29).
+const UR20_MAINNET = "0x66a9893cc07d91d95644aedd05d03f95e1dba8af" as Address;
+const strandedP = async (tx: Parameters<typeof sign>[0], chainId = CHAIN, p = policy()) => {
+  const v = await judge(p, tx, chainId);
+  expect(v, show(v)).toMatchObject({ allow: false, code: "ROUTER_OUTPUT_STRANDED" });
+};
+describe("LaunchGate probes", () => {
+  it("LG1: an open-delta TAKE into the router is an unknown amount: a 1-wei explicit spend doesn't empty it", async () => {
+    await strandedP({ to: UR21, data: plan([v4([A.TAKE(WETH, ADDRESS_THIS, OPEN)]), v4([A.IN_SINGLE(WETH, TOKEN, 1n), A.SETTLE(WETH, 1n, false), A.TAKE_ALL(TOKEN)])]) });
+    await strandedP({ to: UR21, data: plan([v4([A.TAKE(WETH, ADDRESS_THIS, OPEN)]), V3_IN6(MSG_SENDER, [], v3Path(WETH, TOKEN), 1n, false)]) });
+  });
+  it("LG2: UR_V2_1 is exactly the 12 deploy-addresses values (Uniswap/universal-router main)", () => {
+    expect(UR_V2_1).toEqual({
+      1: ["0x4c82d1fbfe28c977cbb58d8c7ff8fcf9f70a2cca", "0x23617e59a5925b2a4bf75d73ff6711cd0b29de85"],
+      10: ["0x8b844f885672f333bc0042cb669255f93a4c1e6b", "0xc09255d86db563cbc11c2fcf4a0c512e160111b4"],
+      8453: ["0xfdf682f51fe81aa4898f0ae2163d8a55c127fbc7", "0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40"],
+      42161: ["0x8b844f885672f333bc0042cb669255f93a4c1e6b", "0x2d01411773c8c24805306e89a41f7855c3c4fe65"],
+      11155111: ["0x7dfd4f31be6814d2906bde155c3e1b146eac1468", "0x7e4f6c5e954da5c61b3423d81e2277431ac043f3"],
+      84532: ["0x8b844f885672f333bc0042cb669255f93a4c1e6b", "0x8702463e73f74d0b6765abceb314ef07acb92650"],
+    });
+  });
+  it("LG3: the Ethereum 2.0 router reads the 2.0 layout: V4_SWAP is unchecked, six-arg swaps non-canonical", async () => {
+    const p = policy({ destinations: { [UR20_MAINNET]: { selectors: ROUTER_SELECTORS } } });
+    const v = await judge(p, { to: UR20_MAINNET, data: plan([userSwap()]) }, 1);
+    expect(v, show(v)).toMatchObject({ allow: false, code: "ROUTER_COMMAND_UNCHECKED" });
+    const w = await judge(p, { to: UR20_MAINNET, data: plan([V3_IN6(MSG_SENDER)]) }, 1);
+    expect(w, show(w)).toMatchObject({ allow: false, code: "NON_CANONICAL_ABI" });
   });
 });

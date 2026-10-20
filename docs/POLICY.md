@@ -224,9 +224,9 @@ chains, and anything outside them is refused until it is understood.
 | `TOO_DEEP` | Batches nested too deeply |
 | `MALFORMED_BATCH` | A batch that doesn't decode cleanly |
 | `ROUTER_COMMAND_UNCHECKED` | A Universal Router command the guard can't check |
-| `ROUTER_RECIPIENT_NOT_ALLOWED` | Swap output going to someone else |
-| `ROUTER_PAYOUT_TO_WRAPPER` | Swap output going to another contract in the same transaction (e.g. the Multicall3 that called the router, directly or through the `MSG_SENDER` constant), where anyone could take it |
-| `ROUTER_OUTPUT_STRANDED` | A Universal Router plan leaves funds in the router itself: a swap, `WRAP_ETH`/`UNWRAP_WETH` or Permit2 pull to `ADDRESS_THIS`, or ETH sent with the call, with no later `SWEEP`/`UNWRAP_WETH` to an allowed payee (or swap spending the whole balance). Anyone can take a balance left in the router. A sweep back to `ADDRESS_THIS`, a partial `TRANSFER`/`PAY_PORTION` and commands flagged "allow revert" don't count |
+| `ROUTER_RECIPIENT_NOT_ALLOWED` | Swap output (including a v4 `TAKE`/`TAKE_PORTION`/`TAKE_ALL`) going to someone else |
+| `ROUTER_PAYOUT_TO_WRAPPER` | Swap output (including a v4 `TAKE`/`TAKE_PORTION`/`TAKE_ALL`) going to another contract in the same transaction (e.g. the Multicall3 that called the router, directly or through the `MSG_SENDER` constant), where anyone could take it |
+| `ROUTER_OUTPUT_STRANDED` | A Universal Router plan leaves funds in the router itself: a swap, `WRAP_ETH`/`UNWRAP_WETH`, Permit2 pull or v4 `TAKE`/`TAKE_PORTION` to `ADDRESS_THIS`, or ETH sent with the call, with no later `SWEEP`/`UNWRAP_WETH` to an allowed payee (or swap spending the whole balance). Anyone can take a balance left in the router. A sweep back to `ADDRESS_THIS`, a partial `TRANSFER`/`PAY_PORTION` and commands flagged "allow revert" don't count. The check assumes an exact-input swap spends its whole `amountIn`. If a pool runs out of liquidity (or a listed v4 hook changes the amounts), the unspent rest stays in the router. Set `amountOutMinimum` so a partial fill reverts |
 | `ROUTER_V4_HOOK_NOT_ALLOWED` | A Universal Router 2.1 v4 swap routes through a pool whose hook isn't in `universalRouter.v4Hooks` |
 | `WINDOW_CAP_EXCEEDED` | Over a rolling cap |
 | `TYPED_DATA_UNKNOWN` | (guarded signer) EIP-712 message it can't check |

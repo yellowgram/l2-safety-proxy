@@ -31,12 +31,15 @@ swaps. All 2.0 rules hold unchanged, and calls to any other router are judged ex
   New policy key `universalRouter.calldataTag`: `"strip"` (default) or `"refuse"`.
 - Decision log lines, `l2sg` response metadata and `Guard.check` results have a `notes` list; a stripped tag is
   named there.
+- `Policy.universalRouter.v4Hooks` and `calldataTag` (optional in the type; `parsePolicy` fills them). A
+  `Policy` built by hand without them allows no v4 hook and refuses the calldata tag.
 
 ### Changed
 
 - Calldata built for 2.0 and sent to a 2.1 router address, or built for 2.1 and sent to any other router, is
   refused (`NON_CANONICAL_ABI`, or `ROUTER_COMMAND_UNCHECKED` for a command the other version doesn't have).
-  A 2.1 router reverts on 2.0 inputs, and 2.0 inputs are the only ones checked on other routers.
+  A 2.1 router reads a sixth argument that 2.0 inputs don't have, so it misreads them (in practice it
+  reverts), and 2.0 inputs are the only ones checked on other routers.
 - `executeSigned` is unpacked on every contract, so its commands are judged even on an `allowAnySelector`
   destination. Its selector still has to be allowed.
 - The `NON_CANONICAL_ABI` reason for a command byte with bit `0x40` on a 2.0 router now says the router version
