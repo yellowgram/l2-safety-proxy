@@ -446,6 +446,35 @@ export async function handleRequest(
     return attachL2sg(config, upstream, chain, chainKey, req.method, decisionMeta);
   };
 
+  // An idempotent retry of bytes the guard already forwarded. Simulating them again is
+  // meaningless (once mined, the nonce is used and the simulation "fails"), so don't.
+  // Known sent → answer with the hash. Outcome unknown → rebroadcast the same bytes,
+  // which can only land once.
+  const replay = checks.length === 1 && carried.raws.length === 1 && checks[0]!.replay ? checks[0]! : undefined;
+  if (replay) {
+    const meta: GuardResponseMeta = {
+      l2SendGuard: true,
+      decision: "forward",
+      confidence: "unknown",
+      certainty: "definite",
+      chainId: chain.chainId,
+      simMethod: "unavailable",
+      layer: 2,
+      policyCode: null,
+      aborted: false,
+      failOpen: false,
+      replay: true,
+      reason:
+        replay.priorStatus === "sent"
+          ? "idempotent retry: this transaction was already sent under this key"
+          : "idempotent retry: the first send's outcome is unknown, so the same bytes were rebroadcast",
+    };
+    if (replay.priorStatus === "sent") {
+      return attachL2sg(config, { jsonrpc: "2.0", id: req.id, result: replay.tx.hash }, chain, chainKey, req.method, meta);
+    }
+    return send(meta);
+  }
+
   // Bundles go to a builder that simulates them atomically and drops ones that revert,
   // so a revert there costs no gas. Each tx in a bundle can depend on the one before it,
   // which a per-tx simulation can't model; Layer 1 is skipped and the response says so.

@@ -164,7 +164,7 @@ Send `Idempotency-Key: <your id>` with the request (or pass `idempotencyKey` to 
 | Situation | Result |
 | --- | --- |
 | First send under the key | Checked and forwarded normally |
-| Same signed transaction again | The first hash is returned; nothing is sent twice |
+| Same signed transaction again | Its hash is returned without simulating again. If the first send's outcome was unknown (timeout), the same bytes are rebroadcast; they can only land once |
 | Different transaction, same key, earlier one sent or still pending | `-32087`, with the earlier hash in `error.data.priorTxHash` |
 | Re-signed with the **same nonce** (e.g. a gas bump) | Allowed: only one of them can land |
 | The earlier transaction was dropped and its nonce used by something else | The key is free again |

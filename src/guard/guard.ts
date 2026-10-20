@@ -40,6 +40,8 @@ export type Check =
       tx: SignedTx;
       /** Identical bytes already sent under this key: forwarding again is harmless. */
       replay: boolean;
+      /** On a replay: what the guard knows about the first send. */
+      priorStatus?: IdemRecord["status"];
       reservationId?: string;
       idempotencyKey?: string;
     }
@@ -123,7 +125,7 @@ export class Guard {
         prior = await store.getIdem(key);
         if (prior && prior.status === "in_flight" && prior.txHash !== tx.hash) prior = await this.resolve(prior);
         if (prior && prior.txHash === tx.hash && prior.status !== "rejected") {
-          return { action: "forward", tx, replay: true, idempotencyKey: key };
+          return { action: "forward", tx, replay: true, idempotencyKey: key, priorStatus: prior.status };
         }
         if (prior && prior.status !== "rejected") {
           const sameSlot = prior.sender === tx.from.toLowerCase() && prior.nonce === tx.nonce && prior.chainId === chainId;

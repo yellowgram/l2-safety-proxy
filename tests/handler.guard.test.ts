@@ -129,6 +129,35 @@ describe("1.0 proxy gate", () => {
     expect(forward).toHaveBeenCalledTimes(1);
   });
 
+  it("an idempotent retry of a sent transaction returns its hash without simulating or sending again", async () => {
+    const cfg = config({ destinations: { [OK]: {} } });
+    const headers = new Headers({ "idempotency-key": "pay-1" });
+    const raw = await sign(OK, 0, ETH);
+    const forward = vi.fn(async () => ({ jsonrpc: "2.0" as const, id: 1, result: "0xupstream" }));
+    expect((await handleRequest(cfg, req("eth_sendRawTransaction", [raw]), headers, { simulate: okSim, forward })).result).toBe("0xupstream");
+    // Mined now: a fresh simulation would fail on the used nonce.
+    const nonceUsed = vi.fn(async (): Promise<SimResult> => ({ ok: false, method: "eth_call", confidence: "definite", reason: "nonce too low", code: "DEFINITE_REVERT" }));
+    const again = await handleRequest(cfg, req("eth_sendRawTransaction", [raw]), headers, { simulate: nonceUsed, forward });
+    expect(again.error).toBeUndefined();
+    expect(again.result).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(nonceUsed).not.toHaveBeenCalled();
+    expect(forward).toHaveBeenCalledTimes(1);
+  });
+
+  it("an idempotent retry after an unknown outcome rebroadcasts the same bytes without simulating", async () => {
+    const cfg = config({ destinations: { [OK]: {} } });
+    const headers = new Headers({ "idempotency-key": "pay-2" });
+    const raw = await sign(OK, 0, ETH);
+    const flaky = vi.fn(async () => { throw new Error("socket hang up"); });
+    await expect(handleRequest(cfg, req("eth_sendRawTransaction", [raw]), headers, { simulate: okSim, forward: flaky })).rejects.toThrow();
+    const sim = vi.fn(okSim);
+    const forward = vi.fn(async () => ({ jsonrpc: "2.0" as const, id: 1, result: "0xupstream" }));
+    const again = await handleRequest(cfg, req("eth_sendRawTransaction", [raw]), headers, { simulate: sim, forward });
+    expect(again.result).toBe("0xupstream");
+    expect(sim).not.toHaveBeenCalled();
+    expect(forward).toHaveBeenCalledTimes(1);
+  });
+
   it("a definite revert gives back the reserved cap and frees the idempotency key", async () => {
     const policy = { window: { seconds: 3600 }, native: { windowMaxWei: ETH.toString() }, destinations: { [OK]: {} } };
     const cfg = config(policy);
