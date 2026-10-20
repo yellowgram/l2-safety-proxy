@@ -668,8 +668,10 @@ describe("the Universal Router calldata tag", () => {
         }
       }
     }
-    // Upper-case hex in the transaction is the same bytes.
+    // Upper-case hex is the same bytes, whether it arrives signed or is handed to evaluateTx directly.
     expect((await judge(policy(), { to: UR21, data: withTag(ok, tag22().toUpperCase()) })).notes).toEqual([tagNote(`0x${tag22()}`)]);
+    const upper = `0x${(ok.slice(2) + tag22()).toUpperCase()}` as Hex;
+    expect(evaluateTx(policy(), { from: AGENT, to: UR21, value: 0n, data: upper }, { chainId: CHAIN, now: 1_000_000 })).toMatchObject({ allow: true, notes: [tagNote(`0x${tag22()}`)] });
   });
 
   it("the stripped prefix is still judged on its own: a bad payout behind a valid tag is refused, with the note", async () => {
@@ -801,6 +803,7 @@ describe("the Universal Router calldata tag", () => {
   it("routerCalldataTag splits only at a tag-sized remainder and only on a listed router and chain", () => {
     expect(routerCalldataTag(UR21, withTag(ok, tag22()), CHAIN)).toEqual({ data: ok, tag: `0x${tag22()}` });
     expect(routerCalldataTag(UR21.toLowerCase(), withTag(ok, TAG10), CHAIN)).toEqual({ data: ok, tag: `0x${TAG10}` });
+    expect(routerCalldataTag(UR21, `0x${(ok.slice(2) + TAG10).toUpperCase()}` as Hex, CHAIN)).toEqual({ data: ok, tag: `0x${TAG10}` });
     expect(routerCalldataTag(UR21, ok, CHAIN)).toBeUndefined();
     // Canonical calldata whose last 22 bytes happen to look like a tag is never cut.
     const looks = (ok.slice(0, -44) + tag22()) as Hex;
