@@ -142,6 +142,8 @@ export interface GuardResponseMeta {
   index?: number;
   /** Identical bytes were already sent under this Idempotency-Key; re-sending them is harmless. */
   replay?: boolean;
+  /** How the guard read the transaction, e.g. a Universal Router calldata tag it stripped before decoding. */
+  notes?: string[];
 }
 
 export interface JsonRpcRequest {

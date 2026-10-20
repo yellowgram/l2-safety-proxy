@@ -8,11 +8,13 @@
  * scripts/ur21-fixtures.mjs). Their expected payees and hooks come from an independent viem decode,
  * not from the guard.
  */
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, encodeFunctionData, encodePacked, parseAbi, parseAbiParameters, type Address, type Hex } from "viem";
 import { evaluateTx } from "../../src/guard/policy/evaluate.js";
-import { UR_V2_1, UR_WETH, flattenCalls, ur21Routers } from "../../src/guard/calls.js";
+import { UR_V2_1, UR_WETH, flattenCalls, routerCalldataTag, ur21Routers } from "../../src/guard/calls.js";
 import { parsePolicy, PolicyError } from "../../src/guard/policy/load.js";
 import { parseSignedTx } from "../../src/guard/tx.js";
 import { Guard } from "../../src/guard/guard.js";
@@ -37,18 +39,20 @@ const canonical = (f: Fixture) => f.input.slice(0, f.input.length - (f.suffix.le
 const NOW = 1_792_454_400;
 
 /** A policy that allows exactly what the transaction pays out to, judged by the independent decode. */
-function fixturePolicy(f: Fixture, o: { hooks?: string[]; payees?: string[]; router?: Address } = {}) {
+function policyJson(f: Fixture, o: { hooks?: string[]; payees?: string[]; router?: Address } = {}) {
   const router = o.router ?? f.router;
   const from = f.from.toLowerCase();
   const tokens: Record<string, unknown> = {};
   for (const t of f.permitTokens) tokens[t] = { approve: { spenders: [router] } };
-  return parsePolicy({
+  return {
     destinations: { [router]: { selectors: ["execute(bytes,bytes[],uint256)"] }, [MULTICALL3]: { selectors: MULTICALL3_SELECTORS } },
     tokens,
     universalRouter: { recipients: (o.payees ?? f.payees).filter((a) => a !== from && a !== router.toLowerCase()), v4Hooks: o.hooks ?? f.hooks },
     permit2: { maxExpirySeconds: 365 * 86400 },
-  });
+  };
 }
+const fixturePolicy = (f: Fixture, o: { hooks?: string[]; payees?: string[]; router?: Address } = {}) => parsePolicy(policyJson(f, o));
+const tagNote = (tag: string) => `stripped the Universal Router calldata tag ${tag} (${(tag.length - 2) / 2} bytes) after the arguments before decoding`;
 const judgeFixture = (f: Fixture, data: Hex, policy = fixturePolicy(f), to: Address = f.router) =>
   evaluateTx(policy, { from: f.from, to, value: BigInt(f.value), data }, { chainId: f.chainId, now: NOW });
 /** Permit2 permits in the capture are for 2^160-1, which the guard always refuses as unlimited. */
@@ -69,14 +73,48 @@ describe("real Universal Router 2.1.2 transactions (tests/fixtures/ur21-onchain.
     expect(FIXTURES.filter((f) => f.status === "0x1")).toHaveLength(90);
   });
 
-  it("94 of 96 carry bytes after the ABI encoding of execute(); those are refused as NON_CANONICAL_ABI", () => {
+  it("94 of 96 end in a calldata tag of the documented form, and 2 end at the arguments", () => {
     const suffixed = FIXTURES.filter((f) => f.suffix !== "0x");
     expect(suffixed).toHaveLength(94);
-    for (const f of suffixed) {
-      // The suffix starts with the ASCII bytes "unix" in every one.
-      expect(f.suffix.slice(0, 10)).toBe("0x756e6978");
-      const v = judgeFixture(f, f.input);
-      expect(v, f.hash).toMatchObject({ allow: false, code: "NON_CANONICAL_ABI" });
+    const short = suffixed.filter((f) => f.suffix === "0x756e697800000000000c");
+    const long = suffixed.filter((f) => /^0x756e69780000[0-9a-f]{12}8000[0-9a-f]{12}0[12]00$/.test(f.suffix));
+    expect([short.length, long.length]).toEqual([4, 90]);
+  });
+
+  it("with the tag on, each one is judged exactly as its canonical prefix is, and the tag is named in a note", () => {
+    for (const f of FIXTURES) {
+      const sent = judgeFixture(f, f.input);
+      const prefix = judgeFixture(f, canonical(f));
+      expect(sent.notes, f.hash).toEqual(f.suffix === "0x" ? undefined : [tagNote(f.suffix)]);
+      expect({ ...sent, notes: undefined }, f.hash).toEqual(prefix);
+    }
+  });
+
+  it("as sent: 79 allowed and 17 APPROVAL_UNLIMITED with payees and hooks listed; 69/14/10/3 when only the router is listed", () => {
+    const tally = (judged: ReturnType<typeof judgeFixture>[]) => {
+      const out: Record<string, number> = {};
+      for (const v of judged) out[v.allow ? "allow" : v.code!] = (out[v.allow ? "allow" : v.code!] ?? 0) + 1;
+      return out;
+    };
+    expect(tally(FIXTURES.map((f) => judgeFixture(f, f.input)))).toEqual({ allow: 79, APPROVAL_UNLIMITED: 17 });
+    const routerOnly = (f: Fixture) => parsePolicy({ destinations: { [f.router]: { selectors: ["execute(bytes,bytes[],uint256)"] } }, permit2: { maxExpirySeconds: 365 * 86400 } });
+    expect(tally(FIXTURES.map((f) => judgeFixture(f, f.input, routerOnly(f))))).toEqual({
+      allow: 69,
+      TOKEN_NOT_ALLOWED: 14,
+      ROUTER_V4_HOOK_NOT_ALLOWED: 10,
+      ROUTER_RECIPIENT_NOT_ALLOWED: 3,
+    });
+  });
+
+  it('with universalRouter.calldataTag "refuse", the 94 tagged ones are NON_CANONICAL_ABI and the other 2 are unchanged', () => {
+    for (const f of FIXTURES) {
+      const base = fixturePolicy(f);
+      const refuse = parsePolicy({ ...policyJson(f), universalRouter: { ...policyJson(f).universalRouter, calldataTag: "refuse" } });
+      expect(base.universalRouter.calldataTag).toBe("strip");
+      const v = judgeFixture(f, f.input, refuse);
+      if (f.suffix === "0x") expect(v, f.hash).toEqual(judgeFixture(f, f.input, base));
+      else expect(v, f.hash).toMatchObject({ allow: false, code: "NON_CANONICAL_ABI" });
+      expect(v.notes).toBeUndefined();
     }
   });
 
@@ -86,8 +124,8 @@ describe("real Universal Router 2.1.2 transactions (tests/fixtures/ur21-onchain.
     expect([...payees].sort()).toEqual(f.payees);
   });
 
-  it.each(FIXTURES.map((f) => [f.hash, f] as const))("%s: allowed once its payees and hooks are listed", (_h, f) => {
-    const v = judgeFixture(f, canonical(f));
+  it.each(FIXTURES.map((f) => [f.hash, f] as const))("%s: allowed as sent once its payees and hooks are listed", (_h, f) => {
+    const v = judgeFixture(f, f.input);
     if (unlimitedPermit(f)) expect(v, v.reason).toMatchObject({ allow: false, code: "APPROVAL_UNLIMITED", path: "tx>execute[0:0x0a]" });
     else expect(v.allow, `${f.hash}: ${v.code} ${v.reason}`).toBe(true);
   });
@@ -605,6 +643,196 @@ describe("V4_SWAP on 2.1: encodings and actions the guard can't check", () => {
   });
 });
 
+describe("the Universal Router calldata tag", () => {
+  // 22 bytes: "unix" ‖ uint64 ms ‖ 80 00 ‖ 2 bytes ‖ 4 bytes ‖ 01|02 ‖ 00. Fields as in the real capture.
+  const tag22 = (o: { magic?: string; ms?: string; b12?: string; b13?: string; mid?: string; ver?: string; end?: string } = {}) =>
+    `${o.magic ?? "756e6978"}${o.ms ?? "0000019a0b1c2d3e"}${o.b12 ?? "80"}${o.b13 ?? "00"}${o.mid ?? "5a3f0000000c"}${o.ver ?? "01"}${o.end ?? "00"}`;
+  const TAG10 = "756e697800000000000c";
+  const ok = plan([V3_IN6(MSG_SENDER)]);
+  const withTag = (data: Hex, tag: string) => (data + tag) as Hex;
+  const nc = { allow: false, code: "NON_CANONICAL_ABI" };
+  const signed = (cmds: readonly Cmd[]) =>
+    encodeFunctionData({
+      abi: SIGNED_ABI,
+      args: [("0x" + cmds.map((c) => c[0].slice(2)).join("")) as Hex, cmds.map((c) => c[1]), `0x${"11".repeat(32)}`, `0x${"22".repeat(32)}`, true, `0x${"33".repeat(32)}`, `0x${"44".repeat(65)}`, 0n],
+    });
+  const exec2 = (cmds: readonly Cmd[]) =>
+    encodeFunctionData({ abi: parseAbi(["function execute(bytes commands, bytes[] inputs)"]), args: [("0x" + cmds.map((c) => c[0].slice(2)).join("")) as Hex, cmds.map((c) => c[1])] });
+
+  it("one 22-byte or 10-byte tag after execute, execute without deadline or executeSigned on a 2.1.2 or 2.1.1 router is stripped and noted", async () => {
+    for (const to of [UR21, UR211]) {
+      for (const data of [ok, exec2([V3_IN6(MSG_SENDER)]), signed([V3_IN6(MSG_SENDER)])]) {
+        for (const tag of [tag22(), tag22({ ver: "02", mid: "ffffffffffff", ms: "0000ffffffffffff" }), TAG10]) {
+          const v = await judge(policy(), { to, data: withTag(data, tag) });
+          expect(v, `${to} ${data.slice(0, 10)} ${tag}`).toMatchObject({ allow: true, notes: [tagNote(`0x${tag}`)] });
+        }
+      }
+    }
+    // Upper-case hex in the transaction is the same bytes.
+    expect((await judge(policy(), { to: UR21, data: withTag(ok, tag22().toUpperCase()) })).notes).toEqual([tagNote(`0x${tag22()}`)]);
+  });
+
+  it("the stripped prefix is still judged on its own: a bad payout behind a valid tag is refused, with the note", async () => {
+    const v = await judge(policy(), { to: UR21, data: withTag(plan([V3_IN6(ATTACKER)]), tag22()) });
+    expect(v).toMatchObject({ allow: false, code: "ROUTER_RECIPIENT_NOT_ALLOWED", path: "tx>execute[0:0x00]", notes: [tagNote(`0x${tag22()}`)] });
+    expect(await judge(policy(), { to: UR21, data: withTag(plan([v4([A.IN_SINGLE(TOKEN, WETH, 100n, HOOK), A.SETTLE_ALL(TOKEN), A.TAKE_ALL(WETH)])]), TAG10) })).toMatchObject({
+      code: "ROUTER_V4_HOOK_NOT_ALLOWED",
+    });
+  });
+
+  it("a wrong prefix is refused", async () => {
+    for (const magic of ["756e6979", "554e4958", "00000000", "786e6975"]) {
+      expect(await judge(policy(), { to: UR21, data: withTag(ok, tag22({ magic })) }), magic).toMatchObject(nc);
+    }
+    for (const t of ["756e697900000000000c", "556e697800000000000c"]) expect(await judge(policy(), { to: UR21, data: withTag(ok, t) }), t).toMatchObject(nc);
+  });
+
+  it("any other 10-byte value is refused: the short form has one observed value only", async () => {
+    for (const t of ["756e697800000000000b", "756e697800000000000d", "756e697800000000010c", "756e697801000000000c"]) {
+      expect(await judge(policy(), { to: UR21, data: withTag(ok, t) }), t).toMatchObject(nc);
+    }
+  });
+
+  it("each fixed field of the 22-byte form is checked", async () => {
+    const bad = {
+      "timestamp of 2^48 ms or more": tag22({ ms: "0001000000000000" }),
+      "timestamp with the top byte set": tag22({ ms: "8000019a0b1c2d3e" }),
+      "timestamp of 0": tag22({ ms: "0000000000000000" }),
+      "timestamp just before 2020-09-13": tag22({ ms: (1_600_000_000_000n - 1n).toString(16).padStart(16, "0") }),
+      "byte 12 not 0x80": tag22({ b12: "81" }),
+      "byte 12 zero": tag22({ b12: "00" }),
+      "byte 13 not 0x00": tag22({ b13: "01" }),
+      "version 0x00": tag22({ ver: "00" }),
+      "version 0x03": tag22({ ver: "03" }),
+      "version 0x11": tag22({ ver: "11" }),
+      "last byte not 0x00": tag22({ end: "01" }),
+      "last byte 0x80": tag22({ end: "80" }),
+    };
+    for (const [why, t] of Object.entries(bad)) expect(await judge(policy(), { to: UR21, data: withTag(ok, t) }), why).toMatchObject(nc);
+    // The boundaries themselves are accepted.
+    for (const ms of [(1_600_000_000_000n).toString(16).padStart(16, "0"), "0000ffffffffffff"]) {
+      expect((await judge(policy(), { to: UR21, data: withTag(ok, tag22({ ms })) })).allow, ms).toBe(true);
+    }
+  });
+
+  it("wrong lengths are refused: a tag cut short or extended by a byte", async () => {
+    const t = tag22();
+    for (const x of [t.slice(0, -2), t + "00", TAG10.slice(0, -2), TAG10 + "00", t.slice(0, 40) + "00" + t.slice(40)]) {
+      expect(await judge(policy(), { to: UR21, data: withTag(ok, x) }), x).toMatchObject(nc);
+    }
+  });
+
+  it("two tags, or a tag with any other bytes before or after it, are refused", async () => {
+    const t = tag22();
+    const word = encodeAbiParameters(parseAbiParameters("address"), [ATTACKER]).slice(2);
+    for (const x of [t + t, TAG10 + TAG10, TAG10 + t, t + TAG10, t + "00", "00" + t, word + t, word + TAG10, t + word, "00".repeat(32) + TAG10]) {
+      expect(await judge(policy(), { to: UR21, data: withTag(ok, x) }), x).toMatchObject(nc);
+    }
+  });
+
+  it("trailing bytes that look like ABI data are refused, tag-shaped or not", async () => {
+    // A whole extra word (an address, or a tag left-aligned in 32 bytes): the length is canonical, so nothing is split off.
+    const asWord = encodeAbiParameters(parseAbiParameters("address"), [ATTACKER]).slice(2);
+    const padded = tag22().padEnd(64, "0");
+    for (const x of [asWord, padded, TAG10.padEnd(64, "0"), "00".repeat(32) + "00".repeat(22)]) {
+      expect(await judge(policy(), { to: UR21, data: withTag(ok, x) }), x).toMatchObject(nc);
+    }
+  });
+
+  it("a tag on any destination other than a 2.1 router's own calldata is refused", async () => {
+    const t = tag22();
+    const p = policy({ tokens: { [TOKEN]: { transfer: { recipients: [ALLOWED] } } } });
+    const transfer = encodeFunctionData({ abi: parseAbi(["function transfer(address,uint256)"]), args: [ALLOWED, 1n] });
+    expect((await judge(p, { to: TOKEN, data: transfer })).allow).toBe(true);
+    expect(await judge(p, { to: TOKEN, data: withTag(transfer, t) })).toMatchObject(nc);
+    expect(await judge(p, { to: TOKEN, data: withTag(transfer, TAG10) })).toMatchObject(nc);
+    // Multicall3 itself, and a router call inside it.
+    const inner = plan([SWEEP(WETH, ALLOWED)]);
+    const pr = policy({ universalRouter: { recipients: [ALLOWED] } });
+    expect((await judge(pr, { to: MULTICALL3, data: aggregate3(UR21, inner) })).allow).toBe(true);
+    expect(await judge(pr, { to: MULTICALL3, data: withTag(aggregate3(UR21, inner), t) })).toMatchObject(nc);
+    expect(await judge(pr, { to: MULTICALL3, data: aggregate3(UR21, withTag(inner, t)) })).toMatchObject(nc);
+    // An EOA destination with a tag as its whole data.
+    expect(await judge(policy(), { to: ALLOWED, data: `0x${t}` })).toMatchObject({ allow: false, code: "SELECTOR_NOT_ALLOWED" });
+  });
+
+  it("a tag on a Universal Router 2.0 is refused: no 2.0 transaction in the capture carried one", async () => {
+    const plan20 = plan([V3_IN5(MSG_SENDER)]);
+    expect((await judge(policy(), { to: UR20, data: plan20 })).allow).toBe(true);
+    expect(await judge(policy(), { to: UR20, data: withTag(plan20, tag22()) })).toMatchObject(nc);
+    expect(await judge(policy(), { to: UR20, data: withTag(plan20, TAG10) })).toMatchObject(nc);
+  });
+
+  it("a 2.1 router address is only a 2.1 router on the chains it is listed for", async () => {
+    const OP211 = "0x8b844f885672f333bc0042cb669255f93a4c1e6b" as Address; // 2.1.1 on OP, Arbitrum and Base Sepolia; not on Base
+    const p = policy({ destinations: { [OP211]: { selectors: ROUTER_SELECTORS } } });
+    const sweep = plan([SWEEP(ETH_C, MSG_SENDER)]);
+    expect((await judge(p, { to: OP211, data: withTag(sweep, tag22()) }, 10)).allow).toBe(true);
+    expect((await judge(p, { to: OP211, data: sweep }, CHAIN)).allow).toBe(true);
+    expect(await judge(p, { to: OP211, data: withTag(sweep, tag22()) }, CHAIN)).toMatchObject(nc);
+  });
+
+  it("a tag inside the plan is refused: on a command input, a sub-plan, a V4 action, or an executeSigned argument", async () => {
+    const t = tag22();
+    const [flag, input] = V3_IN6(MSG_SENDER);
+    expect(await judge(policy(), { to: UR21, data: plan([[flag, withTag(input, t)]]) })).toMatchObject(nc);
+    const subInput = enc("bytes, bytes[]", [flag as Hex, [input]]);
+    expect((await judge(policy(), { to: UR21, data: plan([["0x21", subInput]]) })).allow).toBe(true);
+    expect(await judge(policy(), { to: UR21, data: plan([["0x21", withTag(subInput, t)]]) })).toMatchObject(nc);
+    const [v4flag, v4input] = userSwap();
+    expect(await judge(policy(), { to: UR21, data: plan([[v4flag, withTag(v4input, TAG10)]]) })).toMatchObject(nc);
+    const [code, param] = A.TAKE_ALL(WETH);
+    const acts = [A.IN_SINGLE(TOKEN, WETH, 100n), A.SETTLE_ALL(TOKEN), [code, withTag(param, t)] as Act];
+    expect(await judge(policy(), { to: UR21, data: plan([v4(acts)]) })).toMatchObject(nc);
+  });
+
+  it("only execute and executeSigned are looked at: another function on the router is never cut", async () => {
+    // A listed selector the guard doesn't decode is allowed by its selector alone, as in 2.0; the tag
+    // logic doesn't touch it, so no note and no split.
+    const p = policy({}, [...ROUTER_SELECTORS, EXEC_SIGNED, "collectRewards(bytes)"]);
+    const other = encodeFunctionData({ abi: parseAbi(["function collectRewards(bytes)"]), args: ["0x"] });
+    const v = await judge(p, { to: UR21, data: withTag(other, tag22()) });
+    expect(v.notes).toBeUndefined();
+    expect(routerCalldataTag(UR21, withTag(other, tag22()), CHAIN)).toBeUndefined();
+  });
+
+  it("routerCalldataTag splits only at a tag-sized remainder and only on a listed router and chain", () => {
+    expect(routerCalldataTag(UR21, withTag(ok, tag22()), CHAIN)).toEqual({ data: ok, tag: `0x${tag22()}` });
+    expect(routerCalldataTag(UR21.toLowerCase(), withTag(ok, TAG10), CHAIN)).toEqual({ data: ok, tag: `0x${TAG10}` });
+    expect(routerCalldataTag(UR21, ok, CHAIN)).toBeUndefined();
+    // Canonical calldata whose last 22 bytes happen to look like a tag is never cut.
+    const looks = (ok.slice(0, -44) + tag22()) as Hex;
+    expect(routerCalldataTag(UR21, looks, CHAIN)).toBeUndefined();
+    expect(routerCalldataTag(UR21, withTag(ok, tag22()), 1)).toBeUndefined();
+    expect(routerCalldataTag(UR20, withTag(ok, tag22()), CHAIN)).toBeUndefined();
+    expect(routerCalldataTag(undefined, withTag(ok, tag22()), CHAIN)).toBeUndefined();
+    expect(routerCalldataTag(UR21, `0x${tag22()}` as Hex, CHAIN)).toBeUndefined();
+    expect(routerCalldataTag(UR21, "0x3593" as Hex, CHAIN)).toBeUndefined();
+  });
+
+  it('"refuse" turns it off; the policy key takes only "strip" or "refuse" and defaults to "strip"', async () => {
+    const refuse = policy({ universalRouter: { calldataTag: "refuse" } });
+    expect(refuse.universalRouter.calldataTag).toBe("refuse");
+    expect(policy().universalRouter.calldataTag).toBe("strip");
+    expect(policy({ universalRouter: { calldataTag: "strip" } }).universalRouter.calldataTag).toBe("strip");
+    expect((await judge(refuse, { to: UR21, data: ok })).allow).toBe(true);
+    for (const t of [tag22(), TAG10]) {
+      const v = await judge(refuse, { to: UR21, data: withTag(ok, t) });
+      expect(v).toMatchObject(nc);
+      expect(v.notes).toBeUndefined();
+    }
+    for (const bad of ["allow", "STRIP", true, false, null, 1, ""]) {
+      expect(() => policy({ universalRouter: { calldataTag: bad } }), String(bad)).toThrow(PolicyError);
+      expect(() => policy({ universalRouter: { calldataTag: bad } }), String(bad)).toThrow(/calldataTag/);
+    }
+  });
+
+  it("an untagged transaction gets no note", async () => {
+    const v = await judge(policy(), { to: UR21, data: ok });
+    expect(v).toEqual({ allow: true, spend: expect.anything() });
+  });
+});
+
 describe("through the proxy", () => {
   it("a hooked V4 pool is a -32083 ROUTER_V4_HOOK_NOT_ALLOWED with a hint, and nothing is forwarded", async () => {
     const forward = vi.fn(async () => ({ jsonrpc: "2.0" as const, id: 1, result: "0xok" }));
@@ -621,5 +849,60 @@ describe("through the proxy", () => {
       hint: 'The swap routes through a Uniswap V4 pool with a hook the policy doesn\'t list. Route through pools without hooks, or add the hook to "universalRouter.v4Hooks" if you trust its code.',
     });
     expect(forward).not.toHaveBeenCalled();
+  });
+
+  describe("the decision log names a stripped calldata tag", () => {
+    const TAG = "756e69780000019a0b1c2d3e80005a3f0000000c0100";
+    const run = async (p: ReturnType<typeof policy>, data: Hex, sim: () => Promise<unknown>) => {
+      const dir = mkdtempSync(join(tmpdir(), "l2sg-ur21-"));
+      try {
+        const logPath = join(dir, "decisions.jsonl");
+        const forward = vi.fn(async () => ({ jsonrpc: "2.0" as const, id: 1, result: "0xok" }));
+        const config = {
+          listenHost: "127.0.0.1", listenPort: 0, guardMode: "strict", failOpen: false, defaultChain: "base", decisionLogPath: logPath,
+          guard: new Guard({ policy: p, store: new MemoryStore() }),
+          chains: { base: { id: "base", name: "Base", chainId: CHAIN, upstreamRpcUrl: "http://up", preferSimulateV1: true, ecosystem: "op" } },
+        } as unknown as GuardConfig;
+        const raw = await sign({ to: UR21, data, nonce: 0 });
+        const r = await handleRequest(config, { jsonrpc: "2.0", id: 1, method: "eth_sendRawTransaction", params: [raw] } as never, undefined, { simulate: vi.fn(sim), forward } as never);
+        const rec = JSON.parse(readFileSync(logPath, "utf8").trim()) as Record<string, unknown>;
+        return { r, rec, forwarded: forward.mock.calls.length };
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    const okSim = async () => ({ ok: true, method: "eth_simulateV1", confidence: "definite" });
+    const revert = async () => ({ ok: false, method: "eth_simulateV1", confidence: "definite", reason: "reverted", code: "DEFINITE_REVERT" });
+
+    it("on a forward, the record and the response carry the note, and the original bytes (tag included) are sent", async () => {
+      const { r, rec, forwarded } = await run(policy(), (plan([V3_IN6(MSG_SENDER)]) + TAG) as Hex, okSim);
+      expect(rec).toMatchObject({ decision: "forward", notes: [tagNote(`0x${TAG}`)] });
+      expect((r as { l2sg?: { notes?: string[] } }).l2sg?.notes).toEqual([tagNote(`0x${TAG}`)]);
+      expect(forwarded).toBe(1);
+    });
+    it("on a policy deny and on a simulation abort, too", async () => {
+      const denied = await run(policy(), (plan([V3_IN6(ATTACKER)]) + TAG) as Hex, okSim);
+      expect(denied.rec).toMatchObject({ decision: "policy_denied", policyCode: "ROUTER_RECIPIENT_NOT_ALLOWED", notes: [tagNote(`0x${TAG}`)] });
+      expect(denied.forwarded).toBe(0);
+      const aborted = await run(policy(), (plan([V3_IN6(MSG_SENDER)]) + TAG) as Hex, revert);
+      expect(aborted.rec).toMatchObject({ decision: "abort", notes: [tagNote(`0x${TAG}`)] });
+      expect(aborted.forwarded).toBe(0);
+    });
+    it("Guard.check passes the note on a forward, a policy deny and a rolling-cap deny", async () => {
+      const p = policy({ native: { maxPerTxWei: "10", windowMaxWei: "5" } });
+      const check = async (value: bigint, data: Hex) =>
+        new Guard({ policy: p, store: new MemoryStore() }).check((await sign({ to: UR21, value, data: (data + TAG) as Hex, nonce: 0 })) as Hex, { chainId: CHAIN });
+      expect(await check(5n, plan([WRAP(MSG_SENDER, 5n)]))).toMatchObject({ action: "forward", notes: [tagNote(`0x${TAG}`)] });
+      expect(await check(6n, plan([WRAP(MSG_SENDER, 6n)]))).toMatchObject({ action: "deny", code: "WINDOW_CAP_EXCEEDED", notes: [tagNote(`0x${TAG}`)] });
+      expect(await check(0n, plan([V3_IN6(ATTACKER)]))).toMatchObject({ action: "deny", code: "ROUTER_RECIPIENT_NOT_ALLOWED", notes: [tagNote(`0x${TAG}`)] });
+    });
+    it("no note without a tag, and none when the policy refuses tags", async () => {
+      const plain = await run(policy(), plan([V3_IN6(MSG_SENDER)]), okSim);
+      expect(plain.rec.decision).toBe("forward");
+      expect(plain.rec).not.toHaveProperty("notes");
+      const refused = await run(policy({ universalRouter: { calldataTag: "refuse" } }), (plan([V3_IN6(MSG_SENDER)]) + TAG) as Hex, okSim);
+      expect(refused.rec).toMatchObject({ decision: "policy_denied", policyCode: "NON_CANONICAL_ABI" });
+      expect(refused.rec).not.toHaveProperty("notes");
+    });
   });
 });

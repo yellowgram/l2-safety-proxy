@@ -242,7 +242,10 @@ export function parsePolicy(json: unknown, source = "policy"): Policy {
   if (del.allowAnyChain !== undefined && typeof del.allowAnyChain !== "boolean") fail(`${source}.delegation.allowAnyChain`, "must be a boolean");
 
   const ur = obj(root.universalRouter, `${source}.universalRouter`);
-  only(ur, ["recipients", "v4Hooks"], `${source}.universalRouter`);
+  only(ur, ["recipients", "v4Hooks", "calldataTag"], `${source}.universalRouter`);
+  if (ur.calldataTag !== undefined && ur.calldataTag !== "strip" && ur.calldataTag !== "refuse") {
+    fail(`${source}.universalRouter.calldataTag`, 'must be "strip" or "refuse"');
+  }
   const td = obj(root.typedData, `${source}.typedData`);
   only(td, ["allowUnknown"], `${source}.typedData`);
   if (root.allowContractCreation !== undefined && typeof root.allowContractCreation !== "boolean") {
@@ -277,6 +280,7 @@ export function parsePolicy(json: unknown, source = "policy"): Policy {
     universalRouter: {
       recipients: realAddrs(ur.recipients, `${source}.universalRouter.recipients`),
       v4Hooks: hookAddrs(ur.v4Hooks, `${source}.universalRouter.v4Hooks`),
+      calldataTag: ur.calldataTag === "refuse" ? "refuse" : "strip",
     },
     allowContractCreation: root.allowContractCreation === true,
     typedData: { allowUnknown: td.allowUnknown === true },

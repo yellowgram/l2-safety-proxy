@@ -1,6 +1,6 @@
 import { toFunctionSelector, zeroAddress, type Address, type Hex } from "viem";
 import { EFFECTIVELY_UNLIMITED, MAX_CALLDATA_BYTES, NonCanonicalAbi, UINT160_MAX, decodeKnown, selectorOf } from "../abi.js";
-import { DecodeDenied, UR_WETH, flattenCalls, ur21Routers, type Leaf } from "../calls.js";
+import { DecodeDenied, UR_WETH, flattenCalls, routerCalldataTag, ur21Routers, type Leaf } from "../calls.js";
 import type { Authorization } from "../tx.js";
 import { permit2For } from "./load.js";
 import type { DenyCode, DestinationRule, Policy, Spend, TokenRule, Verdict } from "./types.js";
@@ -55,21 +55,27 @@ const ACCOUNT_ADMIN_SELECTORS = new Map<string, string>(
 export function evaluateTx(policy: Policy, tx: TxInput, opts: EvaluateOptions): Verdict {
   const spend: Spend = { native: 0n, tokens: new Map() };
   const outer = warnings;
+  const outerNotes = notes;
   warnings = [];
+  notes = [];
+  const withNotes = (v: Verdict): Verdict => (notes.length > 0 ? { ...v, notes } : v);
   try {
     run(policy, tx, opts, spend);
-    return warnings.length > 0 ? { allow: true, spend, warnings } : { allow: true, spend };
+    return withNotes(warnings.length > 0 ? { allow: true, spend, warnings } : { allow: true, spend });
   } catch (err) {
-    if (err instanceof Deny) return { allow: false, code: err.code, reason: err.message, path: err.path, spend };
-    if (err instanceof DecodeDenied) return { allow: false, code: err.code as DenyCode, reason: err.message, path: err.path, spend };
+    if (err instanceof Deny) return withNotes({ allow: false, code: err.code, reason: err.message, path: err.path, spend });
+    if (err instanceof DecodeDenied) return withNotes({ allow: false, code: err.code as DenyCode, reason: err.message, path: err.path, spend });
     throw err;
   } finally {
     warnings = outer;
+    notes = outerNotes;
   }
 }
 
 /** Collects per-call warnings while evaluateTx runs (it is synchronous). */
 let warnings: string[] = [];
+/** Collects notes (Verdict.notes) the same way. */
+let notes: string[] = [];
 
 function run(policy: Policy, tx: TxInput, opts: EvaluateOptions, spend: Spend) {
   // Checked before anything is decoded: no legitimate send needs more, and decoding is the expensive part.
@@ -84,8 +90,17 @@ function run(policy: Policy, tx: TxInput, opts: EvaluateOptions, spend: Spend) {
   checkAuthorizations(policy, tx.authorizationList ?? [], chainId);
 
   const permit2 = permit2For(policy, chainId);
+  // The Trading API's calldata tag on a direct call to a 2.1 router: the router never reads it, so it is
+  // taken off before the arguments are decoded and must then be the exact canonical encoding. Only the
+  // transaction's own calldata is looked at; a tag anywhere else is trailing bytes like any other.
+  let data = tx.data;
+  const tagged = policy.universalRouter.calldataTag === "strip" ? routerCalldataTag(tx.to, tx.data, chainId) : undefined;
+  if (tagged) {
+    data = tagged.data;
+    notes.push(`stripped the Universal Router calldata tag ${tagged.tag} (${(tagged.tag.length - 2) / 2} bytes) after the arguments before decoding`);
+  }
   const flat = flattenCalls(
-    { to: tx.to, value: tx.value, data: tx.data },
+    { to: tx.to, value: tx.value, data },
     { sender: tx.from, accounts: policy.accounts, permit2, weth: UR_WETH[chainId], ur21: ur21Routers(chainId), v4Hooks: policy.universalRouter.v4Hooks }
   );
   const sender = tx.from ? lc(tx.from) : undefined;

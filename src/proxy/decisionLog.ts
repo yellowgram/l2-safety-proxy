@@ -24,6 +24,8 @@ export interface DecisionLogRecord {
   path?: string;
   /** Human-readable reason (may contain addresses). */
   reason?: string;
+  /** How the guard read the transaction, e.g. the Universal Router calldata tag it stripped before decoding. */
+  notes?: string[];
 }
 
 export function ensureDecisionLogDir(path: string | undefined): void {

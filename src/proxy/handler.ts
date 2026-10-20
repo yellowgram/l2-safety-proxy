@@ -124,6 +124,7 @@ function writeDecisionLog(
   if (meta.signedChainId != null) record.signedChainId = meta.signedChainId;
   if (meta.path) record.path = meta.path;
   if (meta.reason) record.reason = meta.reason;
+  if (meta.notes && meta.notes.length > 0) record.notes = meta.notes;
   appendDecisionLog(config.decisionLogPath, record);
 }
 
@@ -134,13 +135,15 @@ function abortResponse(
   chainKey: string,
   method: string,
   sim: Extract<SimResult, { ok: false }>,
-  decision: GuardDecision = "abort"
+  decision: GuardDecision = "abort",
+  notes: string[] = []
 ): JsonRpcResponse {
   const code =
     sim.code === "DEFINITE_REVERT" ? ERR_DEFINITE_REVERT : ERR_STRICT_UNCERTAIN;
   const meta = buildMeta(chain, decision, sim, {
     aborted: true,
     failOpen: false,
+    ...(notes.length > 0 ? { notes } : {}),
   });
   recordDecision(decision);
   writeDecisionLog(config, chain, chainKey, method, meta, code);
@@ -169,6 +172,7 @@ function guardDeniedResponse(
     valueWei: bigint;
     priorTxHash?: string;
     index?: number;
+    notes?: string[];
   }
 ): JsonRpcResponse {
   const code =
@@ -196,6 +200,7 @@ function guardDeniedResponse(
     ...(opts.to ? { to: opts.to } : {}),
     ...(opts.priorTxHash ? { priorTxHash: opts.priorTxHash } : {}),
     ...(opts.index !== undefined ? { index: opts.index } : {}),
+    ...(opts.notes && opts.notes.length > 0 ? { notes: opts.notes } : {}),
     value: `0x${opts.valueWei.toString(16)}` as `0x${string}`,
     hint: HINTS[opts.policyCode] ?? "Change the policy file if this send should be allowed. The guard never signs or holds keys.",
   };
@@ -492,6 +497,7 @@ export async function handleRequest(
           valueWei: c.tx?.value ?? 0n,
           priorTxHash: c.priorTxHash,
           ...(carried.raws.length > 1 ? { index: i } : {}),
+          ...(c.notes ? { notes: c.notes } : {}),
         });
       }
       for (const w of c.warnings ?? []) console.warn(`[l2-send-guard] WARNING: ${w}`);
@@ -499,7 +505,10 @@ export async function handleRequest(
     }
   }
 
+  // Per-request notes from the policy check (e.g. a stripped calldata tag) go into every decision below.
+  const notes = checks.flatMap((c) => c.notes ?? []);
   const send = async (decisionMeta: GuardResponseMeta): Promise<JsonRpcResponse> => {
+    if (notes.length > 0) decisionMeta.notes = notes;
     let upstream: JsonRpcResponse;
     try {
       upstream = await forward(chain.upstreamRpcUrl, req);
@@ -570,7 +579,7 @@ export async function handleRequest(
   // Not sent: give back caps and idempotency keys reserved above.
   const abortWithRelease = async (r: Extract<SimResult, { ok: false }>): Promise<JsonRpcResponse> => {
     if (guard) for (const c of checks) await guard.settle(c, "rejected");
-    return abortResponse(config, req.id, chain, chainKey, req.method, r, "abort");
+    return abortResponse(config, req.id, chain, chainKey, req.method, r, "abort", notes);
   };
 
   let sim: SimResult;

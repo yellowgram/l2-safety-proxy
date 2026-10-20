@@ -10,7 +10,12 @@ export interface Policy {
   delegation: { mode: "deny" | "allowlist"; delegates: Set<string>; allowAnyChain: boolean };
   accounts: Set<string>;
   /** recipients: extra payees for router payouts. v4Hooks: V4 hook contracts allowed in a pool key. */
-  universalRouter: { recipients: Set<string>; v4Hooks: Set<string> };
+  /**
+   * calldataTag: what to do with the "unix" calldata tag after the arguments of a call to a
+   * Universal Router 2.1 router (see routerCalldataTag): "strip" it before decoding (default) or
+   * "refuse" it like any other trailing bytes.
+   */
+  universalRouter: { recipients: Set<string>; v4Hooks: Set<string>; calldataTag: "strip" | "refuse" };
   allowContractCreation: boolean;
   typedData: { allowUnknown: boolean };
 }
@@ -53,6 +58,8 @@ export interface Verdict {
   spend: Spend;
   /** On an allowed tx: calls let through only by a loud opt-in (allowAnySelector), one line each. */
   warnings?: string[];
+  /** Facts about how the transaction was read, e.g. a calldata tag that was stripped. Allowed or not. */
+  notes?: string[];
 }
 
 export type DenyCode =

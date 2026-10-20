@@ -46,6 +46,8 @@ export type Check =
       idempotencyKey?: string;
       /** Calls allowed only by allowAnySelector. The proxy prints each as a WARNING. */
       warnings?: string[];
+      /** How the guard read the transaction (Verdict.notes). The proxy writes them to the decision log. */
+      notes?: string[];
     }
   | {
       action: "deny";
@@ -55,6 +57,7 @@ export type Check =
       tx?: SignedTx;
       /** The tx already recorded under this idempotency key, on conflict. */
       priorTxHash?: string;
+      notes?: string[];
     };
 
 /**
@@ -183,7 +186,8 @@ export class Guard {
       } catch (err) {
         return deny("INTERNAL_ERROR", `the policy check failed unexpectedly, refusing to send: ${(err as Error).message}`, undefined, tx);
       }
-      if (!verdict.allow) return deny(verdict.code!, verdict.reason!, verdict.path, tx);
+      const notes = verdict.notes ? { notes: verdict.notes } : {};
+      if (!verdict.allow) return { ...deny(verdict.code!, verdict.reason!, verdict.path, tx), ...notes };
 
       const p = this.opts.policy;
       const limits = { native: p.native.windowMaxWei, tokens: new Map<string, bigint>() };
@@ -192,12 +196,8 @@ export class Guard {
       if (limits.native !== undefined || limits.tokens.size > 0) {
         const r = await store.reserveSpend(CAP_SCOPE_ALL_CHAINS, tx.from, verdict.spend, limits, p.windowSeconds, this.now());
         if (!r.ok) {
-          return deny(
-            "WINDOW_CAP_EXCEEDED",
-            `${r.what === "native" ? "native" : r.what}: ${r.used} already moved in the last ${p.windowSeconds}s; adding ${r.adding} would pass the limit ${r.limit}`,
-            undefined,
-            tx
-          );
+          const why = `${r.what === "native" ? "native" : r.what}: ${r.used} already moved in the last ${p.windowSeconds}s; adding ${r.adding} would pass the limit ${r.limit}`;
+          return { ...deny("WINDOW_CAP_EXCEEDED", why, undefined, tx), ...notes };
         }
         reservationId = r.id;
       }
@@ -230,7 +230,7 @@ export class Guard {
       for (const a of tx.authorizationList) {
         if (a.authority && (a.chainId === chainId || a.chainId === 0)) await store.noteSent(chainId, a.authority, a.nonce, tx.hash);
       }
-      return { action: "forward", tx, replay: false, reservationId, idempotencyKey: key, ...(verdict.warnings ? { warnings: verdict.warnings } : {}) };
+      return { action: "forward", tx, replay: false, reservationId, idempotencyKey: key, ...(verdict.warnings ? { warnings: verdict.warnings } : {}), ...notes };
     } catch (err) {
       if (err instanceof ChainReadError) {
         return deny("CHAIN_READ_FAILED", `couldn't read ${err.what} from the chain's RPC, so the guard can't check for bypasses; refusing to send: ${err.message}`, undefined, tx);

@@ -1,4 +1,4 @@
-import { encodeFunctionData, getAddress, hexToBigInt, sliceHex, size, type Address, type Hex } from "viem";
+import { encodeFunctionData, getAddress, hexToBigInt, sliceHex, size, toFunctionSelector, type Address, type Hex } from "viem";
 import {
   MAX_DEPTH,
   MULTICALL3,
@@ -97,6 +97,62 @@ export const UR_V2_1: Readonly<Record<number, readonly string[]>> = {
 /** The 2.1 routers on `chainId`, as a set for FlattenContext.ur21. */
 export function ur21Routers(chainId: number | undefined): ReadonlySet<string> {
   return new Set(chainId === undefined ? [] : UR_V2_1[chainId] ?? []);
+}
+
+/**
+ * Selectors of the Universal Router entry points whose calldata may end in a calldata tag:
+ * execute(bytes,bytes[],uint256), execute(bytes,bytes[]) and
+ * executeSigned(bytes,bytes[],bytes32,bytes32,bool,bytes32,bytes,uint256).
+ */
+const UR_TAGGED_SELECTORS: ReadonlySet<string> = new Set(
+  ["execute(bytes,bytes[],uint256)", "execute(bytes,bytes[])", "executeSigned(bytes,bytes[],bytes32,bytes32,bool,bytes32,bytes,uint256)"].map((sig) =>
+    toFunctionSelector(`function ${sig}`).toLowerCase()
+  )
+);
+/** ASCII "unix", the first four bytes of every calldata tag. */
+const UR_TAG_MAGIC = "756e6978";
+/** The 10-byte tag, observed only with this exact value. */
+const UR_TAG_SHORT = "756e697800000000000c";
+/** A millisecond Unix time before this (2020-09-13) isn't a plausible tag timestamp. */
+const UR_TAG_MIN_MS = 1_600_000_000_000n;
+
+/**
+ * The calldata tag found after the ABI-encoded arguments of most Universal Router 2.1.2 transactions
+ * built by Uniswap's Trading API. Two forms, and nothing else:
+ *
+ *   10 bytes: exactly 0x756e697800000000000c
+ *   22 bytes: "unix" (0x756e6978) ‖ uint64 big-endian millisecond Unix time, below 2^48 and from
+ *             2020-09-13 on ‖ 0x8000 ‖ 2 bytes ‖ 4 bytes ‖ 0x01 or 0x02 ‖ 0x00
+ *
+ * The 2.1.1/2.1.2 contracts never read calldata past the arguments (no msg.data, calldatasize or
+ * calldatacopy in any of their sources; every read is an ABI offset or a slice of one), so once the
+ * arguments are the exact canonical encoding the tag can't change what the router does.
+ *
+ * Returns the calldata without the tag, and the tag, when `data` is a call to execute or executeSigned
+ * on a 2.1 router of `chainId` and ends in exactly one well-formed tag. Canonical calldata is
+ * 4 + 32·k bytes long, so only a length of 4 + 32·k + 10 or + 22 is ever split; anything else is left
+ * whole for the canonical check to judge.
+ */
+export function routerCalldataTag(to: string | undefined, data: Hex, chainId: number): { data: Hex; tag: Hex } | undefined {
+  if (!to || !ur21Routers(chainId).has(to.toLowerCase())) return undefined;
+  const hex = data.slice(2).toLowerCase();
+  if (hex.length < 8 || !UR_TAGGED_SELECTORS.has(`0x${hex.slice(0, 8)}`)) return undefined;
+  const bytes = hex.length / 2;
+  const n = (bytes - 4) % 32;
+  if (n !== 10 && n !== 22) return undefined;
+  const tag = hex.slice(hex.length - 2 * n);
+  if (!isCalldataTag(tag)) return undefined;
+  return { data: `0x${hex.slice(0, hex.length - 2 * n)}` as Hex, tag: `0x${tag}` as Hex };
+}
+
+function isCalldataTag(tag: string): boolean {
+  if (tag.length === 20) return tag === UR_TAG_SHORT;
+  if (tag.length !== 44 || !tag.startsWith(UR_TAG_MAGIC)) return false;
+  const ms = BigInt(`0x${tag.slice(8, 24)}`);
+  if (ms >= 1n << 48n || ms < UR_TAG_MIN_MS) return false;
+  if (tag.slice(24, 28) !== "8000") return false;
+  const version = tag.slice(40, 42);
+  return (version === "01" || version === "02") && tag.slice(42, 44) === "00";
 }
 
 const lc = (a?: string) => a?.toLowerCase();
