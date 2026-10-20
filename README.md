@@ -309,7 +309,25 @@ close the gap:
 | `L2SG_HOST` / `L2SG_PORT` | `127.0.0.1` / `8545` | Listen address |
 
 Configuration errors stop the process at startup with a message; the proxy never runs with a policy silently off.
-`GET /health` reports the version, chains, mode, store kind and policy counts (never addresses).
+`GET /health` is a read-only endpoint for monitoring. It also returns `ok`, `service`, `version`, `chains`, `chainDetails`,
+`defaultChain`, `guardMode`, `failOpen`, `submit` and `confidence`. Two objects matter when you poll it:
+
+| Object | Field | Meaning |
+|---|---|---|
+| `policy` | `enabled` | `true` when a policy is loaded; `false` with `L2SG_POLICY=off` |
+| | `source` | `file`, or `off` for simulation only |
+| | `store` | State store kind: `file`, `postgres` or `memory` (`null` when the policy is off) |
+| | `bypass` | `lock`, `alert` or `off` (`null` when the policy is off) |
+| | `destinationCount`, `tokenCount` | How many destinations and tokens the policy lists. Counts only: the addresses are never shown |
+| | `delegation` | EIP-7702 delegation mode: `deny` or `allowlist` (`null` when the policy is off) |
+| | `allowContractCreation` | Whether contract deployments are allowed |
+| | `windowSeconds` | Length of the rolling-cap window (`null` when the policy is off) |
+| `decisions` | `forward`, `abort`, `fail_open`, `policy_denied`, `chain_mismatch`, `unsigned_refused`, `idempotency_conflict`, `bypass_locked` | How many send requests ended each way since the process started (not per request; reset on restart) |
+| | `totalSendDecisions` | Sum of the above. Non-send methods are not counted |
+
+```bash
+curl -s http://127.0.0.1:8545/health | jq '.policy, .decisions'
+```
 
 Commands:
 

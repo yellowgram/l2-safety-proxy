@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Tests: Panic `0x22` (storage encoding error) is in the revert-decode table. Thanks @littfed (#14).
+- Docs: the README lists every `/health` `policy` and `decisions` field. Thanks @wufangyong973 (#21).
 
 ## 1.0.0
 
