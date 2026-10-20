@@ -1,7 +1,7 @@
 import type { DecisionClass } from "./types.js";
 
 /**
- * Map guard response metadata → weekly METRICS decision class.
+ * Map guard response metadata → an evaluation decision class.
  *
  * - abort_definite: definite revert blocked (-32080)
  * - probable: uncertain revert path (fail_open in open, or uncertain abort in strict)

@@ -1,4 +1,5 @@
-import type { SpendPolicyConfig } from "../policy/types.js";
+import type { Guard } from "../guard/guard.js";
+import type { Policy } from "../guard/policy/types.js";
 /** Certainty that a simulation result reflects on-chain truth. */
 export type Certainty = "definite" | "uncertain";
 
@@ -27,7 +28,9 @@ export type GuardDecision =
   | "forward"
   | "policy_denied"
   | "chain_mismatch"
-  | "unsigned_refused";
+  | "unsigned_refused"
+  | "idempotency_conflict"
+  | "bypass_locked";
 
 export interface SimSuccess {
   ok: true;
@@ -79,17 +82,24 @@ export interface GuardConfig {
   /** Default chain key when request has no x-l2sg-chain header */
   defaultChain: string;
   /**
-   * open = fail-open on uncertain (default);
-   * strict = abort when sim missing / unknown / low-confidence.
+   * strict = abort when the simulation is missing or uncertain (default);
+   * open = forward anyway (fail-open) and say so in the response.
    */
   guardMode: GuardMode;
   /** Derived: true iff guardMode === "open". Kept for callers/tests. */
   failOpen: boolean;
-  /** Layer 2 address/spend policy (default enabled=false). */
-  policy: SpendPolicyConfig;
+  /**
+   * The send policy, caps, idempotency and bypass detection. Absent only when the
+   * operator chose simulation-only mode (L2SG_POLICY=off).
+   */
+  guard?: Guard;
+  /** Where the policy came from ("off" = simulation only), for the banner and /health. */
+  policySource?: string;
+  /** What loadConfig read; createGuardFromConfig turns it into `guard`. */
+  guardSpec?: GuardSpec;
   /**
    * Append-only JSONL of send decisions. Unset = do not write.
-   * See docs/DECISION_LOG.md.
+   * One JSON object per line: decision, code, chain, method, policyCode, path.
    */
   decisionLogPath?: string;
 }
@@ -124,6 +134,14 @@ export interface GuardResponseMeta {
   to?: `0x${string}`;
   value?: `0x${string}`;
   hint?: string;
+  /** Where in a nested call the policy rule fired, e.g. tx>aggregate3[1]. */
+  path?: string;
+  /** On an idempotency conflict: the transaction already sent under this key. */
+  priorTxHash?: string;
+  /** In a bundle: which transaction was denied. */
+  index?: number;
+  /** Identical bytes were already sent under this Idempotency-Key; re-sending them is harmless. */
+  replay?: boolean;
 }
 
 export interface JsonRpcRequest {
@@ -149,17 +167,38 @@ export interface JsonRpcResponse {
 }
 
 /** Methods that submit signed txs — intercepted for simulation. */
+/** Methods whose first param is one signed raw tx. */
 export const SEND_METHODS = new Set([
   "eth_sendRawTransaction",
   "eth_sendRawTransactionSync",
+  "eth_sendRawTransactionConditional",
+  "eth_sendPrivateRawTransaction",
 ]);
+
+/** Methods that carry signed txs in another shape; see extractSignedTxs. */
+export const WRAPPED_SEND_METHODS = new Set([
+  "eth_sendPrivateTransaction",
+  "eth_sendBundle",
+  "mev_sendBundle",
+]);
+
+/** Anything that looks like a submit and isn't one of the above is refused. */
+export const SUBMIT_LIKE = /^[a-z0-9]+_(send|submit|broadcast|relay)/i;
 
 /**
  * Unsigned send methods — refused (no key custody).
  * Agents/wallets must sign externally and use eth_sendRawTransaction.
  */
+/** The guard holds no keys: anything asking the node to sign is refused (-32081). */
 export const UNSIGNED_SEND_METHODS = new Set([
   "eth_sendTransaction",
+  "eth_signTransaction",
+  "eth_sign",
+  "personal_sign",
+  "eth_signTypedData",
+  "eth_signTypedData_v3",
+  "eth_signTypedData_v4",
+  "wallet_sendCalls",
 ]);
 
 /** Custom error code: definite revert blocked by L2 Send Guard */
@@ -180,9 +219,26 @@ export const ERR_POLICY_DENIED = -32083;
  */
 export const ERR_CHAIN_MISMATCH = -32084;
 
+/** Idempotency key reused for a different transaction, or the state store is down. */
+export const ERR_IDEMPOTENCY = -32087;
+
+/** A transaction from this sender landed without passing the guard; sends are locked. */
+export const ERR_BYPASS_LOCKED = -32088;
+
 /** Map internal SimMethod → response confidence provenance. */
 export function methodConfidence(method: SimMethod): MethodConfidence {
   if (method === "eth_simulateV1") return "simulate_v1";
   if (method === "eth_call") return "eth_call";
   return "unknown";
+}
+
+export interface GuardSpec {
+  policy: Policy;
+  store: { kind: "memory" } | { kind: "file"; path: string } | { kind: "postgres"; url: string };
+  idempotencyTtlSeconds: number;
+  /** lock = refuse further sends from a sender after a bypass (default); alert = log only. */
+  bypass: "lock" | "alert" | "off";
+  alertWebhook?: string;
+  /** Receive-side watch (L2SG_WATCH_AGENTS). Off when unset. */
+  watch?: { agents: string[]; expectedSenders: string[]; dustRaw: bigint; intervalSeconds: number };
 }

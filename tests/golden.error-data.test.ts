@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import { handleRequest } from "../src/proxy/handler.js";
-import { defaultSpendPolicy } from "../src/policy/index.js";
 import type { GuardConfig, GuardResponseMeta, SimResult } from "../src/types/index.js";
 import {
   ERR_DEFINITE_REVERT,
@@ -9,6 +8,7 @@ import {
   ERR_UNSIGNED_SEND_REFUSED,
 } from "../src/types/index.js";
 import { FAKE_RAW as RAW } from "./fixtures.js";
+import { guardWith } from "./support/guard.js";
 
 function config(mode: "open" | "strict" = "open"): GuardConfig {
   return {
@@ -16,7 +16,6 @@ function config(mode: "open" | "strict" = "open"): GuardConfig {
     listenPort: 8545,
     guardMode: mode,
     failOpen: mode === "open",
-    policy: defaultSpendPolicy(),
     defaultChain: "arb-sepolia",
     chains: {
       "arb-sepolia": {
@@ -106,9 +105,7 @@ describe("golden error.data shape", () => {
 
   it("-32083 policy denied", async () => {
     const cfg = config();
-    cfg.policy = defaultSpendPolicy();
-    cfg.policy.enabled = true;
-    cfg.policy.destinations = new Map();
+    cfg.guard = guardWith({});
     const simulate = vi.fn();
     const forward = vi.fn();
     const res = await handleRequest(
@@ -129,16 +126,12 @@ describe("golden error.data shape", () => {
       layer: 2,
     });
     expect(typeof data.policyCode).toBe("string");
-    expect(data.policyCode).toBe("DESTINATION_NOT_ALLOWLISTED");
+    expect(data.policyCode).toBe("DESTINATION_NOT_ALLOWED");
   });
 
   it("-32083 TX_UNPARSEABLE when policy is on and the raw tx does not parse", async () => {
     const cfg = config();
-    cfg.policy = defaultSpendPolicy();
-    cfg.policy.enabled = true;
-    cfg.policy.destinations = new Map([
-      ["0x0000000000000000000000000000000000000001", {}],
-    ]);
+    cfg.guard = guardWith({ destinations: { "0x0000000000000000000000000000000000000001": {} } });
     const simulate = vi.fn();
     const forward = vi.fn();
     const res = await handleRequest(

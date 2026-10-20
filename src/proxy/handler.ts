@@ -9,17 +9,21 @@ import type {
   SimResult,
 } from "../types/index.js";
 import {
+  ERR_BYPASS_LOCKED,
   ERR_CHAIN_MISMATCH,
   ERR_DEFINITE_REVERT,
+  ERR_IDEMPOTENCY,
   ERR_POLICY_DENIED,
   ERR_STRICT_UNCERTAIN,
   ERR_UNSIGNED_SEND_REFUSED,
   SEND_METHODS,
+  SUBMIT_LIKE,
   UNSIGNED_SEND_METHODS,
+  WRAPPED_SEND_METHODS,
   methodConfidence,
 } from "../types/index.js";
 import { decodeRevertData } from "../decode/revert.js";
-import { evaluateSpendPolicy, notifyPolicyDenied } from "../policy/index.js";
+import { classifyUpstream, type Check } from "../guard/guard.js";
 import { forwardRaw } from "../sim/rpcClient.js";
 import { simulateRawTransaction } from "../sim/simulator.js";
 import { parseRawTransaction } from "../sim/txParse.js";
@@ -117,6 +121,8 @@ function writeDecisionLog(
     method,
   };
   if (meta.signedChainId != null) record.signedChainId = meta.signedChainId;
+  if (meta.path) record.path = meta.path;
+  if (meta.reason) record.reason = meta.reason;
   appendDecisionLog(config.decisionLogPath, record);
 }
 
@@ -148,7 +154,7 @@ function abortResponse(
   };
 }
 
-function policyDeniedResponse(
+function guardDeniedResponse(
   config: GuardConfig,
   id: JsonRpcRequest["id"],
   chain: ChainConfig,
@@ -157,13 +163,24 @@ function policyDeniedResponse(
   opts: {
     reason: string;
     policyCode: string;
+    path?: string;
     to?: `0x${string}`;
     valueWei: bigint;
+    priorTxHash?: string;
+    index?: number;
   }
 ): JsonRpcResponse {
+  const code =
+    opts.policyCode === "IDEMPOTENCY_CONFLICT" || opts.policyCode === "STORE_DOWN" || opts.policyCode === "CHAIN_READ_FAILED"
+      ? ERR_IDEMPOTENCY
+      : opts.policyCode === "BYPASS_LOCKED"
+        ? ERR_BYPASS_LOCKED
+        : ERR_POLICY_DENIED;
+  const decision: GuardDecision =
+    code === ERR_IDEMPOTENCY ? "idempotency_conflict" : code === ERR_BYPASS_LOCKED ? "bypass_locked" : "policy_denied";
   const meta: GuardResponseMeta = {
     l2SendGuard: true,
-    decision: "policy_denied",
+    decision,
     confidence: "unknown",
     certainty: "definite",
     chainId: chain.chainId,
@@ -174,21 +191,64 @@ function policyDeniedResponse(
     reason: opts.reason,
     code: opts.policyCode,
     policyCode: opts.policyCode,
+    ...(opts.path ? { path: opts.path } : {}),
     ...(opts.to ? { to: opts.to } : {}),
+    ...(opts.priorTxHash ? { priorTxHash: opts.priorTxHash } : {}),
+    ...(opts.index !== undefined ? { index: opts.index } : {}),
     value: `0x${opts.valueWei.toString(16)}` as `0x${string}`,
-    hint: "Update Layer 2 policy allowlist/caps or disable L2SG_POLICY_ENABLED. Operator keeps keys.",
+    hint: HINTS[opts.policyCode] ?? "Change the policy file if this send should be allowed. The guard never signs or holds keys.",
   };
-  recordDecision("policy_denied");
-  writeDecisionLog(config, chain, chainKey, method, meta, ERR_POLICY_DENIED);
+  recordDecision(decision);
+  writeDecisionLog(config, chain, chainKey, method, meta, code);
   return {
     jsonrpc: "2.0",
     id,
-    error: {
-      code: ERR_POLICY_DENIED,
-      message: `L2 Send Guard: policy_denied — ${opts.reason}`,
-      data: meta,
-    },
+    error: { code, message: `L2 Send Guard: ${decision} — ${opts.reason}`, data: meta },
   };
+}
+
+const HINTS: Record<string, string> = {
+  IDEMPOTENCY_CONFLICT: "This Idempotency-Key already sent a different transaction. Use a new key, or re-sign with the same nonce to replace it.",
+  STORE_DOWN: "The guard's state store failed, so it refused to send. Fix the store (see /health) and retry.",
+  CHAIN_READ_FAILED: "The guard couldn't read the sender's nonce from the upstream RPC, so it refused to send. Nothing was sent; retry, or check the RPC.",
+  BYPASS_LOCKED: "A transaction from this sender reached the chain without going through the guard. Find out why, then run: l2-send-guard unlock <address> --chain <id>.",
+  METHOD_NOT_GATED: "This method submits transactions in a way the guard can't check. Use eth_sendRawTransaction.",
+};
+
+/** The signed txs a send method carries. `null` = not a send method. */
+export function extractSignedTxs(req: JsonRpcRequest): { raws: string[]; bundle: boolean } | { error: string } | null {
+  const p0 = req.params?.[0] as unknown;
+  if (SEND_METHODS.has(req.method)) {
+    return typeof p0 === "string" && p0.startsWith("0x") ? { raws: [p0], bundle: false } : { error: "expected hex raw transaction" };
+  }
+  if (!WRAPPED_SEND_METHODS.has(req.method)) return null;
+  if (req.method === "eth_sendPrivateTransaction") {
+    const tx = (p0 as { tx?: unknown } | undefined)?.tx;
+    return typeof tx === "string" && tx.startsWith("0x") ? { raws: [tx], bundle: false } : { error: "expected { tx: hex }" };
+  }
+  if (req.method === "eth_sendBundle") {
+    const txs = (p0 as { txs?: unknown } | undefined)?.txs;
+    if (!Array.isArray(txs) || txs.length === 0 || !txs.every((t) => typeof t === "string" && t.startsWith("0x"))) {
+      return { error: "expected { txs: hex[] }" };
+    }
+    return { raws: txs as string[], bundle: true };
+  }
+  // mev_sendBundle: body items are { tx } (ours, signed), { hash } (someone else's, already public) or { bundle } (nested).
+  const raws: string[] = [];
+  const walk = (b: unknown, depth: number): boolean => {
+    const body = (b as { body?: unknown } | undefined)?.body;
+    if (!Array.isArray(body) || depth > 4) return false;
+    for (const item of body) {
+      const it = item as { tx?: unknown; hash?: unknown; bundle?: unknown };
+      if (typeof it.tx === "string" && it.tx.startsWith("0x")) raws.push(it.tx);
+      else if (it.bundle !== undefined) {
+        if (!walk(it.bundle, depth + 1)) return false;
+      } else if (typeof it.hash !== "string") return false;
+    }
+    return true;
+  };
+  if (!walk(p0, 0)) return { error: "expected { body: [{ tx } | { hash } | { bundle }] }" };
+  return { raws, bundle: true };
 }
 
 function attachL2sg(
@@ -204,21 +264,52 @@ function attachL2sg(
   return { ...res, l2sg: meta };
 }
 
+function chainMismatchResponse(
+  config: GuardConfig,
+  req: JsonRpcRequest,
+  chain: ChainConfig,
+  chainKey: string,
+  signedChainId: number
+): JsonRpcResponse {
+  const meta: GuardResponseMeta = {
+    l2SendGuard: true,
+    decision: "chain_mismatch",
+    confidence: "unknown",
+    certainty: "definite",
+    chainId: chain.chainId,
+    signedChainId,
+    simMethod: "unavailable",
+    layer: null,
+    policyCode: null,
+    aborted: true,
+    failOpen: false,
+    code: "CHAIN_MISMATCH",
+    reason: `signed chainId ${signedChainId} does not match selected chain ${chain.chainId} (${chainKey})`,
+    hint: "Set x-l2sg-chain to the chain you signed, or re-sign for the selected chain. Not forwarded.",
+  };
+  recordDecision("chain_mismatch");
+  writeDecisionLog(config, chain, chainKey, req.method, meta, ERR_CHAIN_MISMATCH);
+  return {
+    jsonrpc: "2.0",
+    id: req.id,
+    error: { code: ERR_CHAIN_MISMATCH, message: `L2 Send Guard: chain_mismatch — ${meta.reason}`, data: meta },
+  };
+}
+
 /**
  * Core middleware, in order:
  * 1. Resolve chain from `x-l2sg-chain` (key or numeric id) or the default chain.
- * 2. Refuse `eth_sendTransaction` (-32081). No parse, no sim, no forward.
- * 3. Parse the signed raw tx. If `chainId` is present and ≠ the selected chain,
- *    stop with -32084 `chain_mismatch` (no sim, no policy, no forward).
- *    Legacy txs with no chainId are not compared.
- *    If policy is enabled and the raw tx does not parse, stop with -32083
- *    `TX_UNPARSEABLE` (do not fail-open). Policy off keeps the Layer 1 path.
- * 4. If Layer 2 policy is enabled, evaluate allowlist + caps. Deny → -32083
- *    `policy_denied` and do not simulate. Policy denials never fail-open.
- * 5. Layer 1 simulate. Definite revert → -32080 abort (no forward).
- *    Uncertain → fail-open forward when GUARD_MODE=open, else -32082.
- *
- * GUARD_MODE only affects Layer 1 simulation uncertainty.
+ * 2. Refuse anything that asks the node to sign (-32081). The guard holds no keys.
+ * 3. Find the signed txs the method carries (raw, private, conditional, bundles).
+ *    A submit-like method the guard doesn't know is refused (-32083 METHOD_NOT_GATED).
+ *    Other methods pass through.
+ * 4. Any carried tx signed for another chain → -32084, nothing forwarded.
+ * 5. Layer 2 (unless simulation-only mode): policy over every nested call, 7702
+ *    authorizations, rolling caps, Idempotency-Key, bypass lock. Deny → -32083 / -32087 /
+ *    -32088; earlier txs of the same request are released.
+ * 6. Layer 1 simulate (single txs; bundles are left to the builder). Definite revert →
+ *    -32080. Uncertain → -32082 in strict mode (default), forwarded in open mode.
+ * 7. Forward, then record what the upstream did (frees caps and keys on a rejection).
  */
 export async function handleRequest(
   config: GuardConfig,
@@ -263,7 +354,7 @@ export async function handleRequest(
       failOpen: false,
       code: "UNSIGNED_SEND_REFUSED",
       reason: "eth_sendTransaction refused — no key custody",
-      hint: "Point your JSON-RPC URL at this proxy; keep signing in your wallet/agent. See docs/AGENTS.md.",
+      hint: "Point your JSON-RPC URL at this proxy; keep signing in your wallet/agent.",
     };
     recordDecision("unsigned_refused");
     writeDecisionLog(config, chain, chainKey, req.method, meta, ERR_UNSIGNED_SEND_REFUSED);
@@ -283,101 +374,103 @@ export async function handleRequest(
     };
   }
 
-  if (!SEND_METHODS.has(req.method)) {
-    return forward(chain.upstreamRpcUrl, req);
-  }
-
-  const raw = req.params?.[0];
-  if (typeof raw !== "string" || !raw.startsWith("0x")) {
-    return {
-      jsonrpc: "2.0",
-      id: req.id,
-      error: {
-        code: -32602,
-        message: "invalid params: expected hex raw transaction",
-      },
-    };
-  }
-
-  // Parse once. Failure with policy on is a definite stop (the fence cannot run).
-  // Failure with policy off keeps the Layer 1 path.
-  let parsed: ReturnType<typeof parseRawTransaction> | undefined;
-  try {
-    parsed = parseRawTransaction(raw as Hex);
-  } catch {
-    parsed = undefined;
-  }
-
-  if (!parsed && config.policy?.enabled) {
-    return policyDeniedResponse(config, req.id, chain, chainKey, req.method, {
-      reason: "signed transaction could not be parsed; Layer 2 policy was not evaluated",
-      policyCode: "TX_UNPARSEABLE",
-      valueWei: 0n,
-    });
-  }
-
-  if (
-    parsed?.tx.chainId != null &&
-    parsed.tx.chainId !== chain.chainId
-  ) {
-    const meta: GuardResponseMeta = {
-      l2SendGuard: true,
-      decision: "chain_mismatch",
-      confidence: "unknown",
-      certainty: "definite",
-      chainId: chain.chainId,
-      signedChainId: parsed.tx.chainId,
-      simMethod: "unavailable",
-      layer: null,
-      policyCode: null,
-      aborted: true,
-      failOpen: false,
-      code: "CHAIN_MISMATCH",
-      reason: `signed chainId ${parsed.tx.chainId} does not match selected chain ${chain.chainId} (${chainKey})`,
-      hint: "Set x-l2sg-chain to the chain you signed, or re-sign for the selected chain. Not forwarded.",
-    };
-    recordDecision("chain_mismatch");
-    writeDecisionLog(config, chain, chainKey, req.method, meta, ERR_CHAIN_MISMATCH);
-    return {
-      jsonrpc: "2.0",
-      id: req.id,
-      error: {
-        code: ERR_CHAIN_MISMATCH,
-        message: `L2 Send Guard: chain_mismatch — ${meta.reason}`,
-        data: meta,
-      },
-    };
-  }
-
-  const policy = config.policy;
-  if (policy?.enabled && parsed) {
-    const check = evaluateSpendPolicy(policy, {
-      chainKey,
-      chainId: chain.chainId,
-      to: parsed.to,
-      value: parsed.value,
-      data: parsed.data,
-    });
-    if (!check.allow) {
-      notifyPolicyDenied(
-        policy,
-        {
-          chainKey,
-          chainId: chain.chainId,
-          to: parsed.to,
-          value: parsed.value,
-          data: parsed.data,
-        },
-        check
-      );
-      return policyDeniedResponse(config, req.id, chain, chainKey, req.method, {
-        reason: check.reason ?? "policy denied",
-        policyCode: check.code ?? "DESTINATION_NOT_ALLOWLISTED",
-        to: check.effectiveTo ?? parsed.to,
-        valueWei: check.valueWei,
+  const carried = extractSignedTxs(req);
+  if (carried === null) {
+    if (SUBMIT_LIKE.test(req.method)) {
+      return guardDeniedResponse(config, req.id, chain, chainKey, req.method, {
+        reason: `${req.method} submits transactions in a way the guard can't check, so it is refused`,
+        policyCode: "METHOD_NOT_GATED",
+        valueWei: 0n,
       });
     }
+    return forward(chain.upstreamRpcUrl, req);
   }
+  if ("error" in carried) {
+    return { jsonrpc: "2.0", id: req.id, error: { code: -32602, message: `invalid params: ${carried.error}` } };
+  }
+  if (carried.raws.length === 0) return forward(chain.upstreamRpcUrl, req);
+
+  // Chain check on every carried tx (legacy txs with no chainId are not compared).
+  for (const r of carried.raws) {
+    let signedChainId: number | undefined;
+    try {
+      signedChainId = parseRawTransaction(r as Hex).tx.chainId ?? undefined;
+    } catch {
+      signedChainId = undefined;
+    }
+    if (signedChainId != null && signedChainId !== chain.chainId) {
+      return chainMismatchResponse(config, req, chain, chainKey, signedChainId);
+    }
+  }
+
+  // Layer 2: policy, caps, idempotency, bypass detection. Every tx must pass.
+  const guard = config.guard;
+  const checks: Extract<Check, { action: "forward" }>[] = [];
+  if (guard) {
+    const headerKey = headers?.get("idempotency-key")?.trim() || undefined;
+    for (const [i, r] of carried.raws.entries()) {
+      const key = headerKey && carried.raws.length > 1 ? `${headerKey}#${i}` : headerKey;
+      const c = await guard.check(r as Hex, { chainId: chain.chainId, idempotencyKey: key });
+      if (c.action === "deny") {
+        for (const done of checks) await guard.settle(done, "rejected");
+        return guardDeniedResponse(config, req.id, chain, chainKey, req.method, {
+          reason: c.reason,
+          policyCode: c.code,
+          path: c.path,
+          to: c.tx?.to,
+          valueWei: c.tx?.value ?? 0n,
+          priorTxHash: c.priorTxHash,
+          ...(carried.raws.length > 1 ? { index: i } : {}),
+        });
+      }
+      checks.push(c);
+    }
+  }
+
+  const send = async (decisionMeta: GuardResponseMeta): Promise<JsonRpcResponse> => {
+    let upstream: JsonRpcResponse;
+    try {
+      upstream = await forward(chain.upstreamRpcUrl, req);
+    } catch (err) {
+      if (guard) for (const c of checks) await guard.settle(c, "unknown");
+      throw err;
+    }
+    const outcome = classifyUpstream(upstream, false);
+    if (guard) for (const c of checks) await guard.settle(c, outcome);
+    // Re-sending bytes the node already has is the idempotent case: answer with the hash.
+    const only = checks.length === 1 ? checks[0] : undefined;
+    if (only && upstream.error && outcome === "accepted" && (req.method === "eth_sendRawTransaction" || req.method === "eth_sendPrivateRawTransaction")) {
+      upstream = { jsonrpc: "2.0", id: upstream.id, result: only.tx.hash };
+    }
+    if (only?.replay) decisionMeta.replay = true;
+    return attachL2sg(config, upstream, chain, chainKey, req.method, decisionMeta);
+  };
+
+  // Bundles go to a builder that simulates them atomically and drops ones that revert,
+  // so a revert there costs no gas. Each tx in a bundle can depend on the one before it,
+  // which a per-tx simulation can't model; Layer 1 is skipped and the response says so.
+  if (carried.bundle) {
+    return send({
+      l2SendGuard: true,
+      decision: "forward",
+      confidence: "unknown",
+      certainty: "uncertain",
+      chainId: chain.chainId,
+      simMethod: "unavailable",
+      layer: 2,
+      policyCode: null,
+      aborted: false,
+      failOpen: false,
+      reason: "bundle: policy checked for every tx; simulation is left to the builder",
+    });
+  }
+  const raw = carried.raws[0] as Hex;
+
+  // Not sent: give back caps and idempotency keys reserved above.
+  const abortWithRelease = async (r: Extract<SimResult, { ok: false }>): Promise<JsonRpcResponse> => {
+    if (guard) for (const c of checks) await guard.settle(c, "rejected");
+    return abortResponse(config, req.id, chain, chainKey, req.method, r, "abort");
+  };
 
   let sim: SimResult;
   try {
@@ -391,52 +484,28 @@ export async function handleRequest(
       code: "SIM_FAILURE",
     };
     if (config.guardMode === "open") {
-      const upstream = await forward(chain.upstreamRpcUrl, req);
-      return attachL2sg(
-        config,
-        upstream,
-        chain,
-        chainKey,
-        req.method,
-        buildMeta(chain, "fail_open", thrown, { failOpen: true, aborted: false })
-      );
+      return send(buildMeta(chain, "fail_open", thrown, { failOpen: true, aborted: false }));
     }
-    return abortResponse(config, req.id, chain, chainKey, req.method, thrown);
+    return abortWithRelease(thrown);
   }
 
   // Success path → forward
   if (sim.ok) {
-    const upstream = await forward(chain.upstreamRpcUrl, req);
-    return attachL2sg(
-      config,
-      upstream,
-      chain,
-      chainKey,
-      req.method,
-      buildMeta(chain, "forward", sim, { aborted: false, failOpen: false })
-    );
+    return send(buildMeta(chain, "forward", sim, { aborted: false, failOpen: false }));
   }
 
   // Definite revert → abort (never forward)
   if (sim.confidence === "definite" && sim.code === "DEFINITE_REVERT") {
-    return abortResponse(config, req.id, chain, chainKey, req.method, sim, "abort");
+    return abortWithRelease(sim);
   }
 
   // Uncertain / sim failure
   if (config.guardMode === "open") {
-    const upstream = await forward(chain.upstreamRpcUrl, req);
-    return attachL2sg(
-      config,
-      upstream,
-      chain,
-      chainKey,
-      req.method,
-      buildMeta(chain, "fail_open", sim, { failOpen: true, aborted: false })
-    );
+    return send(buildMeta(chain, "fail_open", sim, { failOpen: true, aborted: false }));
   }
 
   // strict: abort on missing / unknown / low-confidence
-  return abortResponse(config, req.id, chain, chainKey, req.method, sim, "abort");
+  return abortWithRelease(sim);
 }
 
 export async function handlePayload(

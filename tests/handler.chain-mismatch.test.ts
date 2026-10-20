@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import { handleRequest } from "../src/proxy/handler.js";
-import { defaultSpendPolicy } from "../src/policy/index.js";
 import type { GuardConfig } from "../src/types/index.js";
 import { ERR_CHAIN_MISMATCH } from "../src/types/index.js";
 import { FAKE_RAW as RAW } from "./fixtures.js";
@@ -11,7 +10,6 @@ function config(): GuardConfig {
     listenPort: 8545,
     guardMode: "open",
     failOpen: true,
-    policy: defaultSpendPolicy(),
     defaultChain: "arb-sepolia",
     chains: {
       "arb-sepolia": {

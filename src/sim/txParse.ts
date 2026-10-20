@@ -12,6 +12,8 @@ export interface ParsedSend {
   data?: Hex;
   value: bigint;
   gas?: bigint;
+  /** EIP-7702: code overrides that make the simulation run the delegated code. */
+  codeOverrides?: Record<string, { code: Hex }>;
 }
 
 /**

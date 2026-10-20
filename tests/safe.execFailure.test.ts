@@ -14,7 +14,6 @@ import {
 } from "../src/sim/safeExec.js";
 import { COMMON_ERRORS_ABI } from "../src/decode/revert.js";
 import { handleRequest } from "../src/proxy/handler.js";
-import { defaultSpendPolicy } from "../src/policy/index.js";
 import { FAKE_FROM, FAKE_RAW, SAFE_EXEC_RAW } from "./fixtures.js";
 
 const baseChain = (over: Partial<ChainConfig> = {}): ChainConfig => ({
@@ -308,7 +307,6 @@ describe("Safe execTransaction ExecutionFailure (#17)", () => {
       listenPort: 8545,
       guardMode: "open",
       failOpen: true,
-      policy: defaultSpendPolicy(),
       defaultChain: "arb-sepolia",
       chains: { "arb-sepolia": baseChain() },
     };

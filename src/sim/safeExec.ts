@@ -13,7 +13,7 @@ export const EXEC_TRANSACTION_SELECTOR = "0x6a761202" as const;
 export const EXECUTION_FAILURE_TOPIC =
   "0x23428b18acfb3ea64b08dc0c1d296ea9c09702c09083ca5272e64d115b687d23" as const;
 
-/** Out of P0 — documented residual only. */
+/** Not inspected: module transactions bypass execTransaction signatures and events. */
 export const EXEC_TRANSACTION_FROM_MODULE_SELECTOR = "0x468721a7" as const;
 
 const EXEC_TX_PREFIX = EXEC_TRANSACTION_SELECTOR.toLowerCase();

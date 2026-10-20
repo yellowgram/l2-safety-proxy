@@ -46,7 +46,7 @@ type Scenario = {
 
 /**
  * Target ~340 fixtures across classes including Layer 2 policy_denied (200–500 band).
- * Counts chosen for stable weekly METRICS denominators.
+ * Counts are fixed so reports compare run to run.
  */
 const PLAN: Array<{ scenario: Scenario; count: number }> = [
   // abort_definite (~100)

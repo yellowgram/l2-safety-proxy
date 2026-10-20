@@ -6,18 +6,18 @@ import {
   getDecisionCounters,
   resetDecisionCounters,
 } from "../src/proxy/counters.js";
-import { defaultSpendPolicy } from "../src/policy/index.js";
 import type { GuardConfig, SimResult } from "../src/types/index.js";
 import { FAKE_RAW as RAW } from "./fixtures.js";
 import { ERR_DEFINITE_REVERT, ERR_POLICY_DENIED } from "../src/types/index.js";
+import { guardWith } from "./support/guard.js";
 
-function baseConfig(policy = defaultSpendPolicy()): GuardConfig {
+function baseConfig(policy?: unknown): GuardConfig {
   return {
     listenHost: "127.0.0.1",
     listenPort: 0,
     guardMode: "open",
     failOpen: true,
-    policy,
+    ...(policy ? { guard: guardWith(policy) } : {}),
     defaultChain: "arb-sepolia",
     chains: {
       "arb-sepolia": {
@@ -38,13 +38,12 @@ describe("health policy summary + decision counters", () => {
   });
 
   it("/health includes policy summary without addresses and zero counters", async () => {
-    const policy = defaultSpendPolicy();
-    policy.enabled = true;
-    policy.destinations = new Map([
-      ["0x1111111111111111111111111111111111111111", {}],
-      ["0x2222222222222222222222222222222222222222", {}],
-    ]);
-    const config = baseConfig(policy);
+    const config = baseConfig({
+      destinations: {
+        "0x1111111111111111111111111111111111111111": {},
+        "0x2222222222222222222222222222222222222222": {},
+      },
+    });
     const server = createServer(config);
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
     const addr = server.address();
@@ -54,34 +53,8 @@ describe("health policy summary + decision counters", () => {
     expect(body.ok).toBe(true);
     expect(body.policy.enabled).toBe(true);
     expect(body.policy.destinationCount).toBe(2);
-    policy.chains = {
-      "op-sepolia": {
-        destinations: new Map([
-          ["0x3333333333333333333333333333333333333333", {}],
-        ]),
-      },
-    };
-    const serverOverlay = createServer(baseConfig(policy));
-    await new Promise<void>((r) => serverOverlay.listen(0, "127.0.0.1", () => r()));
-    const addrOverlay = serverOverlay.address();
-    if (!addrOverlay || typeof addrOverlay === "string") throw new Error("no addr");
-    const overlayBody = await fetch(`http://127.0.0.1:${addrOverlay.port}/health`).then((r) =>
-      r.json()
-    );
-    expect(overlayBody.policy.destinationCount).toBe(3);
-    expect(JSON.stringify(overlayBody)).not.toMatch(/0x33333333/i);
-    await new Promise<void>((r) => serverOverlay.close(() => r()));
-    expect(body.policy.notifyConfigured).toBe(false);
+    expect(body.policy.delegation).toBe("deny");
     expect(JSON.stringify(body)).not.toMatch(/0x11111111/i);
-    policy.humanGate = { mode: "stop", notifyUrl: "http://127.0.0.1:9/hook" };
-    const server2 = createServer(baseConfig(policy));
-    await new Promise<void>((r) => server2.listen(0, "127.0.0.1", () => r()));
-    const addr2 = server2.address();
-    if (!addr2 || typeof addr2 === "string") throw new Error("no addr");
-    const body2 = await fetch(`http://127.0.0.1:${addr2.port}/health`).then((r) => r.json());
-    expect(body2.policy.notifyConfigured).toBe(true);
-    expect(JSON.stringify(body2)).not.toMatch(/127\.0\.0\.1:9/);
-    await new Promise<void>((r) => server2.close(() => r()));
     expect(body.decisions.totalSendDecisions).toBe(0);
     await new Promise<void>((r) => server.close(() => r()));
   });
@@ -114,13 +87,8 @@ describe("health policy summary + decision counters", () => {
     expect(abortRes.error?.code).toBe(ERR_DEFINITE_REVERT);
     expect(getDecisionCounters().abort).toBe(1);
 
-    const pol = defaultSpendPolicy();
-    pol.enabled = true;
-    pol.destinations = new Map([
-      ["0x1111111111111111111111111111111111111111", {}],
-    ]);
     const denyRes = await handleRequest(
-      baseConfig(pol),
+      baseConfig({ destinations: { "0x1111111111111111111111111111111111111111": {} } }),
       {
         jsonrpc: "2.0",
         id: 2,
@@ -144,5 +112,22 @@ describe("health policy summary + decision counters", () => {
     expect(c.policy_denied).toBe(1);
     expect(c.abort).toBe(1);
     expect(c.totalSendDecisions).toBe(2);
+  });
+});
+
+describe("request size", () => {
+  it("rejects a body over the limit with 413", async () => {
+    const { createServer, MAX_BODY_BYTES } = await import("../src/proxy/server.js");
+    const server = createServer({ listenHost: "127.0.0.1", listenPort: 0, chains: {}, defaultChain: "x", guardMode: "strict", failOpen: false } as never);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as { port: number }).port;
+    const status = await new Promise<number>((resolve, reject) => {
+      const r = http.request({ host: "127.0.0.1", port, method: "POST" }, (res) => resolve(res.statusCode!));
+      r.on("error", reject);
+      r.write("x".repeat(MAX_BODY_BYTES + 1));
+      r.end();
+    });
+    server.close();
+    expect(status).toBe(413);
   });
 });

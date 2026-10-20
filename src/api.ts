@@ -8,5 +8,9 @@ export * from "./types/index.js";
 export * from "./sdk/index.js";
 export * from "./agent/index.js";
 
-export * from "./policy/index.js";
+export * from "./guard/index.js";
+export { createGuardFromConfig, openStore, rpcReader, startWatch, isAlarming } from "./config/guard.js";
+export { readPolicyFile, parseStoreSpec } from "./config/env.js";
+export { migrateLegacyPolicy } from "./config/migrate.js";
+export { extractSignedTxs } from "./proxy/handler.js";
 export { getDecisionCounters, resetDecisionCounters, type DecisionCounters } from "./proxy/counters.js";

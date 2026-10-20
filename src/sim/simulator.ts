@@ -10,6 +10,7 @@ import {
 } from "./capabilityCache.js";
 import { isExecTransactionData } from "./safeExec.js";
 import { inspectExecTransactionTrace } from "./debugTraceCall.js";
+import { ethCallHonorsOverrides, planDelegation } from "./delegation.js";
 
 export interface SimulatorDeps {
   call?: RpcCaller;
@@ -69,6 +70,26 @@ export async function simulateRawTransaction(
     };
   }
 
+  // EIP-7702: simulate with the delegations the authorizations will install.
+  const plan = await planDelegation(rawTx, chain.chainId, call);
+  if (plan.kind === "uncertain") {
+    return { ok: false, method: "unavailable", confidence: "uncertain", reason: plan.reason, code: "SIM_FAILURE" };
+  }
+  const delegated = plan.kind === "overrides" && Object.keys(plan.overrides).length > 0;
+  if (plan.kind === "overrides") parsed.codeOverrides = plan.overrides;
+  const ethCall = async (c: RpcCaller, key: string): Promise<SimResult> => {
+    if (delegated && !(await ethCallHonorsOverrides(c, key))) {
+      return {
+        ok: false,
+        method: "eth_call",
+        confidence: "uncertain",
+        reason: "7702 transaction: this RPC has no eth_simulateV1 and ignores eth_call state overrides, so the delegated code can't be simulated",
+        code: "SIM_FAILURE",
+      };
+    }
+    return simulateEthCall(c, parsed, from);
+  };
+
   let result: SimResult;
 
   if (chain.preferSimulateV1 && !isSimulateV1Unsupported(primaryKey)) {
@@ -78,10 +99,10 @@ export async function simulateRawTransaction(
     } else {
       // Unsupported for this upstream — cache and fall through to eth_call
       markSimulateV1Unsupported(primaryKey);
-      result = await simulateEthCall(call, parsed, from);
+      result = await ethCall(call, primaryKey);
     }
   } else {
-    result = await simulateEthCall(call, parsed, from);
+    result = await ethCall(call, primaryKey);
   }
 
   // Primary uncertain — optional alternate RPC for simulation only
@@ -100,10 +121,10 @@ export async function simulateRawTransaction(
         fb = v1;
       } else {
         markSimulateV1Unsupported(fbKey);
-        fb = await simulateEthCall(fallbackCall, parsed, from);
+        fb = await ethCall(fallbackCall, fbKey);
       }
     } else {
-      fb = await simulateEthCall(fallbackCall, parsed, from);
+      fb = await ethCall(fallbackCall, fbKey);
     }
     if (fb.ok || fb.confidence === "definite") {
       result = fb;
@@ -181,7 +202,7 @@ async function applySafeExecCertainty(
     };
   }
 
-  // No log array and no usable trace → uncertain (never definite-forward the P0)
+  // No log array and no usable trace → uncertain (an outer success may hide an inner Safe failure)
   return {
     ok: false,
     method: result.method,

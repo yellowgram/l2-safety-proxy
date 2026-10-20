@@ -12,6 +12,8 @@ export interface DecisionCounters {
   policy_denied: number;
   chain_mismatch: number;
   unsigned_refused: number;
+  idempotency_conflict: number;
+  bypass_locked: number;
   /** Non-send methods are not counted */
   totalSendDecisions: number;
 }
@@ -23,6 +25,8 @@ const counters: DecisionCounters = {
   policy_denied: 0,
   chain_mismatch: 0,
   unsigned_refused: 0,
+  idempotency_conflict: 0,
+  bypass_locked: 0,
   totalSendDecisions: 0,
 };
 
@@ -33,6 +37,8 @@ export function recordDecision(decision: GuardDecision): void {
   else if (decision === "policy_denied") counters.policy_denied += 1;
   else if (decision === "chain_mismatch") counters.chain_mismatch += 1;
   else if (decision === "unsigned_refused") counters.unsigned_refused += 1;
+  else if (decision === "idempotency_conflict") counters.idempotency_conflict += 1;
+  else if (decision === "bypass_locked") counters.bypass_locked += 1;
   else return;
   counters.totalSendDecisions += 1;
 }
@@ -49,5 +55,7 @@ export function resetDecisionCounters(): void {
   counters.policy_denied = 0;
   counters.chain_mismatch = 0;
   counters.unsigned_refused = 0;
+  counters.idempotency_conflict = 0;
+  counters.bypass_locked = 0;
   counters.totalSendDecisions = 0;
 }

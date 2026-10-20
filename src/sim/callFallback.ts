@@ -24,7 +24,8 @@ export async function simulateEthCall(
   if (parsed.gas) txCall.gas = `0x${parsed.gas.toString(16)}`;
 
   try {
-    await call("eth_call", [txCall, "latest"]);
+    const overrides = parsed.codeOverrides;
+    await call("eth_call", overrides && Object.keys(overrides).length > 0 ? [txCall, "latest", overrides] : [txCall, "latest"]);
     return {
       ok: true,
       method: "eth_call",

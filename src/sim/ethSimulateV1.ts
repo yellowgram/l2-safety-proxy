@@ -56,7 +56,11 @@ export async function simulateV1(
   const params = [
     [
       {
-        blockStateCalls: [{ calls: [callObj] }],
+        blockStateCalls: [
+          parsed.codeOverrides && Object.keys(parsed.codeOverrides).length > 0
+            ? { stateOverrides: parsed.codeOverrides, calls: [callObj] }
+            : { calls: [callObj] },
+        ],
         traceTransfers: false,
         validation: true,
       },

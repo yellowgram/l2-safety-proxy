@@ -1,6 +1,6 @@
 /**
  * Evaluation harness types (offline / synthetic corpus).
- * Decision classes for weekly METRICS pass/fail rates.
+ * Decision classes for pass/fail rates.
  */
 
 export type DecisionClass =

@@ -71,11 +71,9 @@
     "demo:sepolia": "node scripts/demo-sepolia.mjs",
     "eval": "tsx evaluation/run.ts",
     "eval:generate": "tsx evaluation/generate-fixtures.ts",
-    "agent:loop": "tsx src/agent/loop.ts",
     "demo:delta-a": "node --env-file=.env scripts/delta-a-live-proof.mjs",
     "probe:gascap": "bash scripts/check-rpc-gascap.sh",
     "demo:dual-layer": "node scripts/demo-dual-layer.mjs",
-    "policy:check": "tsx scripts/policy-check.ts",
     "demo:agent-halt": "node examples/agent-viem-halt.mjs",
     "prepublishOnly": "npm run build",
     "demo:safe-exec": "node scripts/demo-safe-exec.mjs"

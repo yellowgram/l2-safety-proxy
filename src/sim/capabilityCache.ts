@@ -1,3 +1,4 @@
+import { clearOverrideProbeCache } from "./delegation.js";
 /**
  * Process-lifetime cache of upstream RPC capabilities.
  * After eth_simulateV1 returns unsupported (-32601 / -32602 / etc.),
@@ -41,6 +42,7 @@ export function clearDebugTraceCallCapabilityCache(): void {
 export function clearAllCapabilityCaches(): void {
   clearSimulateV1CapabilityCache();
   clearDebugTraceCallCapabilityCache();
+  clearOverrideProbeCache();
 }
 
 export function debugTraceCallUnsupportedCount(): number {

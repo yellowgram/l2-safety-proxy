@@ -10,7 +10,9 @@ import type {
   GuardResponseMeta,
   SimResult,
 } from "../src/types/index.js";
-import { defaultSpendPolicy } from "../src/policy/index.js";
+import { Guard } from "../src/guard/guard.js";
+import { parsePolicy } from "../src/guard/policy/load.js";
+import { MemoryStore } from "../src/guard/store/memory.js";
 import { classifyDecision } from "./classify.js";
 import type {
   ClassStats,
@@ -80,19 +82,19 @@ function buildConfig(fixture: EvalFixture): GuardConfig {
         ? "base"
         : "op-stack") as "arbitrum" | "base" | "op-stack",
   };
-  const policy = defaultSpendPolicy();
-  if (fixture.policyAllowlist !== undefined) {
-    policy.enabled = true;
-    policy.destinations = new Map(
-      fixture.policyAllowlist.map((a) => [a.toLowerCase(), {}])
-    );
-  }
+  const guard =
+    fixture.policyAllowlist !== undefined
+      ? new Guard({
+          policy: parsePolicy({ destinations: Object.fromEntries(fixture.policyAllowlist.map((a) => [a, {}])) }),
+          store: new MemoryStore(),
+        })
+      : undefined;
   return {
     listenHost: "127.0.0.1",
     listenPort: 0,
     guardMode: fixture.guardMode,
     failOpen: fixture.guardMode === "open",
-    policy,
+    ...(guard ? { guard } : {}),
     defaultChain: fixture.chainKey,
     chains: { [fixture.chainKey]: chain },
   };
@@ -281,7 +283,7 @@ export async function runEval(
     byChain[k] = finalizeStats(byChain[k]);
   }
 
-  // Prefer repo-relative path for weekly METRICS
+  // Prefer a repo-relative path in reports
   const cwd = process.cwd();
   const corpusPathForReport = corpusPath.startsWith(cwd + "/")
     ? corpusPath.slice(cwd.length + 1)

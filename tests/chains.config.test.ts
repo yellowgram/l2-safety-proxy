@@ -52,8 +52,8 @@ describe("chain templates + loadConfig", () => {
     expect(cfg.defaultChain).toBe("arb-sepolia");
     expect(cfg.chains["op-sepolia"]?.upstreamRpcUrl).toBeTruthy();
     expect(cfg.chains["op-sepolia"]?.chainId).toBe(11155420);
-    expect(cfg.guardMode).toBe("open");
-    expect(cfg.failOpen).toBe(true);
+    expect(cfg.guardMode).toBe("strict");
+    expect(cfg.failOpen).toBe(false);
   });
 
   it("can enable only OP Sepolia via env", () => {
@@ -77,7 +77,7 @@ describe("chain templates + loadConfig", () => {
     expect(cfg.failOpen).toBe(false);
   });
 
-  it("GUARD_MODE=open is default fail-open", () => {
+  it("GUARD_MODE=open forwards uncertain simulations", () => {
     stash({
       GUARD_MODE: "open",
       L2SG_FAIL_OPEN: undefined,
@@ -86,3 +86,34 @@ describe("chain templates + loadConfig", () => {
     expect(cfg.guardMode).toBe("open");
     expect(cfg.failOpen).toBe(true);
   });
+
+describe("L2SG_CHAINS is explicit", () => {
+  const saved = { ...process.env };
+  afterEach(() => { process.env = { ...saved }; });
+  it("refuses an unknown chain instead of skipping it", async () => {
+    process.env.L2SG_CHAINS = "arb-sepolia,arb-sepoila";
+    const { loadConfig } = await import("../src/config/env.js");
+    expect(() => loadConfig()).toThrow(/unknown chain "arb-sepoila"/);
+  });
+  it("refuses a mainnet with no RPC set", async () => {
+    process.env.L2SG_CHAINS = "base";
+    delete process.env.L2SG_RPC_BASE;
+    const { loadConfig } = await import("../src/config/env.js");
+    expect(() => loadConfig()).toThrow(/Set L2SG_RPC_BASE/);
+  });
+});
+
+describe("L2SG_WATCH_* settings", () => {
+  const saved = { ...process.env };
+  afterEach(() => { process.env = { ...saved }; });
+  it("needs a policy", async () => {
+    process.env.L2SG_WATCH_AGENTS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+    const { loadConfig } = await import("../src/config/env.js");
+    expect(() => loadConfig()).toThrow(/needs a policy file/);
+  });
+  it("refuses watch options without agents", async () => {
+    process.env.L2SG_WATCH_DUST_RAW = "100";
+    const { loadConfig } = await import("../src/config/env.js");
+    expect(() => loadConfig()).toThrow(/L2SG_WATCH_AGENTS is not/);
+  });
+});

@@ -1,7 +1,7 @@
 /**
  * Thin agent API: check(rawTx) → decision without broadcasting.
- * Founder-controlled / offline-friendly; no hosted SaaS surface.
- * When policy is provided/enabled, Layer 2 runs before simulation.
+ * A dry run: the policy is evaluated but no cap is reserved and no idempotency key is used.
+ * When a policy is given, Layer 2 runs before simulation.
  */
 import type { Hex } from "viem";
 import type {
@@ -16,10 +16,9 @@ import { methodConfidence } from "../types/index.js";
 import { simulateRawTransaction } from "../sim/simulator.js";
 import { parseRawTransaction } from "../sim/txParse.js";
 import { decodeRevertData } from "../decode/revert.js";
-import {
-  evaluateSpendPolicy,
-  type SpendPolicyConfig,
-} from "../policy/index.js";
+import { evaluateTx } from "../guard/policy/evaluate.js";
+import type { Policy } from "../guard/policy/types.js";
+import { parseSignedTx } from "../guard/tx.js";
 
 /** Surface returned by check() — stable agent contract. */
 export interface CheckResult {
@@ -34,17 +33,14 @@ export interface CheckResult {
 }
 
 export interface CheckOptions {
-  /** Guard policy; default open (fail-open on uncertain). */
+  /** strict (default) aborts on an uncertain simulation; open forwards it. */
   guardMode?: "open" | "strict";
   /** Injected simulate (tests / offline loop). */
   simulate?: (chain: ChainConfig, rawTx: Hex) => Promise<SimResult>;
-  /**
-   * Optional Layer 2 policy. When enabled, evaluate before sim.
-   * Prefer checkWithConfig so GuardConfig.policy is applied automatically.
-   */
-  policy?: SpendPolicyConfig;
-  /** Chain key for per-chain policy overlay (defaults to chain.id). */
-  chainKey?: string;
+  /** Layer 2 policy, evaluated before simulation. checkWithConfig passes the configured one. */
+  policy?: Policy;
+  /** Addresses flagged by the receive watch (POISONED_ADDRESS). */
+  poisoned?: Set<string>;
 }
 
 function decide(
@@ -80,10 +76,9 @@ export async function check(
   chain: ChainConfig,
   opts: CheckOptions = {}
 ): Promise<CheckResult> {
-  const guardMode = opts.guardMode ?? "open";
+  const guardMode = opts.guardMode ?? "strict";
   const simulate = opts.simulate ?? simulateRawTransaction;
   const policy = opts.policy;
-  const chainKey = opts.chainKey ?? chain.id;
 
   let parsed: ReturnType<typeof parseRawTransaction> | undefined;
   try {
@@ -92,7 +87,7 @@ export async function check(
     parsed = undefined;
   }
 
-  if (policy?.enabled && !parsed) {
+  if (policy && !parsed) {
     return {
       decision: "policy_denied",
       reason: "signed transaction could not be parsed; Layer 2 policy was not evaluated",
@@ -114,22 +109,24 @@ export async function check(
     };
   }
 
-  if (policy?.enabled && parsed) {
-    const result = evaluateSpendPolicy(policy, {
-      chainKey,
-      chainId: chain.chainId,
-      to: parsed.to,
-      value: parsed.value,
-      data: parsed.data,
-    });
-    if (!result.allow) {
+  if (policy && parsed) {
+    let tx;
+    try {
+      tx = await parseSignedTx(rawTx);
+    } catch {
+      tx = undefined;
+    }
+    const verdict = tx
+      ? evaluateTx(policy, tx, { chainId: chain.chainId, now: Math.floor(Date.now() / 1000), poisoned: opts.poisoned ?? new Set() })
+      : { allow: false, code: "TX_UNPARSEABLE", reason: "signed transaction could not be parsed" };
+    if (!verdict.allow) {
       return {
         decision: "policy_denied",
-        reason: result.reason ?? "policy denied",
+        reason: verdict.reason ?? "policy denied",
         certainty: "definite",
         simProvenance: "unknown",
         layer: 2,
-        policyCode: result.code,
+        policyCode: verdict.code ?? null,
       };
     }
   }
@@ -159,7 +156,7 @@ export async function check(
 
 /**
  * Convenience: resolve chain from a GuardConfig by key and run check().
- * Applies config.policy (Layer 2) automatically.
+ * Applies the configured policy (Layer 2) automatically.
  */
 export async function checkWithConfig(
   rawTx: Hex,
@@ -181,7 +178,6 @@ export async function checkWithConfig(
   return check(rawTx, chain, {
     ...opts,
     guardMode: opts.guardMode ?? config.guardMode,
-    policy: opts.policy ?? config.policy,
-    chainKey: key,
+    policy: opts.policy ?? config.guard?.policy ?? config.guardSpec?.policy,
   });
 }

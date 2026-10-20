@@ -20,6 +20,10 @@ export interface DecisionLogRecord {
   method: string;
   /** Present when decision is chain_mismatch. */
   signedChainId?: number;
+  /** Where in the call tree a policy rule fired, e.g. tx>aggregate3[1]. */
+  path?: string;
+  /** Human-readable reason (may contain addresses). */
+  reason?: string;
 }
 
 export function ensureDecisionLogDir(path: string | undefined): void {

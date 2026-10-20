@@ -1,6 +1,6 @@
 # Evaluation harness (offline)
 
-Synthetic corpus + runner for L2 Send Guard decision classes. **No live broadcast** (D1 not required).
+Synthetic corpus + runner for L2 Send Guard decision classes. Nothing is broadcast.
 
 ## Corpus
 
@@ -11,7 +11,7 @@ Synthetic corpus + runner for L2 Send Guard decision classes. **No live broadcas
 | **Source** | Deterministic generator: `npm run eval:generate` |
 | **Chain** | Every row is `arb-sepolia` / chainId `421614`. The committed raw transaction is signed for that chain. OP and Base labels are not in this corpus. |
 
-Decision classes (weekly METRICS):
+Decision classes:
 
 | Class | Meaning |
 | --- | --- |
@@ -31,7 +31,7 @@ npm run eval            # run offline harness → evaluation/report/latest.{json
 
 Optional: `npx tsx evaluation/run.ts --corpus=/abs/path/corpus.jsonl`
 
-## Report fields (METRICS)
+## Report fields
 
 - `corpusPath` / `corpusSize`
 - `totals.passRate` / `totals.failRate`

@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleRequest } from "../src/proxy/handler.js";
-import { defaultSpendPolicy } from "../src/policy/index.js";
 import type { GuardConfig } from "../src/types/index.js";
 import { FAKE_RAW as RAW } from "./fixtures.js";
+import { guardWith } from "./support/guard.js";
 
 describe("decision log JSONL", () => {
   const dirs: string[] = [];
@@ -17,14 +17,12 @@ describe("decision log JSONL", () => {
     const dir = mkdtempSync(join(tmpdir(), "l2sg-log-"));
     dirs.push(dir);
     const logPath = join(dir, "decisions.jsonl");
-    const policy = defaultSpendPolicy();
-    policy.enabled = true;
     const config: GuardConfig = {
       listenHost: "127.0.0.1",
       listenPort: 8545,
       guardMode: "open",
       failOpen: true,
-      policy,
+      guard: guardWith({}),
       decisionLogPath: logPath,
       defaultChain: "arb-sepolia",
       chains: {
@@ -50,7 +48,7 @@ describe("decision log JSONL", () => {
     expect(rec.code).toBe(-32083);
     expect(rec.chainId).toBe(421614);
     expect(rec.layer).toBe(2);
-    expect(rec.policyCode).toBe("DESTINATION_NOT_ALLOWLISTED");
+    expect(rec.policyCode).toBe("DESTINATION_NOT_ALLOWED");
     expect(rec.failOpen).toBe(false);
     expect(rec.method).toBe("eth_sendRawTransaction");
     expect(line).toMatch(/policy_denied/);
