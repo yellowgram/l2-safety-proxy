@@ -265,7 +265,9 @@ close the gap:
   may be called, and a destination without a list takes no calldata at all (`SELECTORS_REQUIRED`). Within a
   listed function, the guard doesn't know what the contract does with the arguments: listing a general-purpose
   router's `swap` lets the agent swap through it. `"allowAnySelector": true` lifts the function list for one
-  destination; it is printed as a warning at startup and in `check-policy`, and is rarely what you want.
+  destination, and is rarely what you want: the proxy refuses to start with it unless whoever runs it also sets
+  `GUARD_ALLOW_ANY_SELECTOR=1`, in either `GUARD_MODE`. It then prints a `WARNING` at startup, in
+  `check-policy`, and for every call it lets through.
 - **Contract or account.** The guard is offline and never asks the chain whether an address has code (code can
   appear later through CREATE2 or an EIP-7702 delegation). Calldata decides: a send with empty calldata is a
   plain transfer and needs no function list; anything with calldata needs one. A plain transfer to a contract
@@ -314,6 +316,7 @@ close the gap:
 | `L2SG_RPC_<NAME>` | public testnet RPC | Upstream RPC, e.g. `L2SG_RPC_BASE`, `L2SG_RPC_ARB_SEPOLIA` |
 | `L2SG_RPC_FALLBACK_<NAME>` | — | Second RPC used only for simulation |
 | `GUARD_MODE` | `strict` | `strict` refuses when simulation can't decide; `open` forwards |
+| `GUARD_ALLOW_ANY_SELECTOR` | `0` | `1` accepts `"allowAnySelector": true` in the policy (in either `GUARD_MODE`); without it the proxy refuses to start with such a policy. Alias `L2SG_ALLOW_ANY_SELECTOR` |
 | `L2SG_STORE` | `file:./l2-send-guard-state.jsonl` | `file:<path>`, `postgres://…` (needs `npm i pg`), or `memory` |
 | `L2SG_IDEMPOTENCY_TTL_SECONDS` | `86400` | How long settled keys are kept |
 | `L2SG_BYPASS` | `lock` | `lock`, `alert` (log and webhook only) or `off` |
@@ -351,7 +354,7 @@ Commands:
 ```
 l2-send-guard [serve]                          start the proxy
 l2-send-guard check-policy <file>              validate a policy and print a summary and warnings
-l2-send-guard migrate-policy <0.x-file>        print the current form of a 0.x policy file
+l2-send-guard migrate-policy <old-file>        print the 2.0 form of a 0.x or 1.x policy file
 l2-send-guard unlock <address> --chain <id>    clear a bypass lock (stop the proxy first if you use the file store)
 ```
 
@@ -377,8 +380,13 @@ on it, so allowlisting a DEX router allowed its admin and sweep functions too. I
   - `"selectors": [...]`: the functions the agent may call (4-byte selectors or signatures; `"0x"` also allows
     plain ETH transfers). Use this for every contract, including Multicall3 and routers you call through.
   - `"type": "eoa"`: a plain account that only receives ETH. Calls with calldata to it are refused.
-  - `"allowAnySelector": true`: every function, as in 1.x. Only if you really mean it: it prints a `WARNING` at
-    startup and in `check-policy`.
+  - `"allowAnySelector": true`: every function, as in 1.x. Only if you really mean it: the proxy refuses to start
+    with it unless you also set `GUARD_ALLOW_ANY_SELECTOR=1`. That acknowledgement is separate from
+    `GUARD_MODE`: `strict` stays strict, and `open` doesn't accept it on its own. It then prints a `WARNING` at
+    startup, in `check-policy`, and for every call it lets through.
+  - `npx l2-send-guard migrate-policy old-policy.json > policy.json` does this for a whole 1.x file: it keeps
+    every cap, token, account and recipient as they are and writes each destination without `selectors` as
+    `"type": "eoa"`, with a note listing them. Then add `selectors` for the contracts among them.
 - A call with calldata to a destination that has no function list is refused with the new code
   `SELECTORS_REQUIRED`. This only arises for policies built in code; a policy file can't load without a list.
 - Calldata of one to three bytes is no longer treated as a plain transfer, so `"0x"` in `selectors` no longer
@@ -392,10 +400,15 @@ on it, so allowlisting a DEX router allowed its admin and sweep functions too. I
 - Funds a Universal Router plan leaves in the router itself (a swap to `ADDRESS_THIS` with nothing sweeping it
   out) are refused (`ROUTER_OUTPUT_STRANDED`): anyone can take a balance left in the router. End such a plan
   with `SWEEP` or `UNWRAP_WETH` to `MSG_SENDER`, as Uniswap's own SDK does.
-- `migrate-policy` writes 0.x destinations as `"type": "eoa"`. Replace that with a `selectors` list for any
-  contract you call.
-- Library: `selectorWarnings(policy)` returns the warnings for `allowAnySelector` destinations; log them if you
-  load policies yourself. `DestinationRule` has new optional fields `anySelector` and `eoa`.
+- A key written twice in one object of a policy file (for example the same destination twice) is refused.
+  Before, the last one silently won.
+- `accounts` and `universalRouter.recipients` can't list `0x…01` or `0x…02`, the router's `MSG_SENDER` and
+  `ADDRESS_THIS` constants.
+- `migrate-policy` writes 0.x destinations, and 1.x destinations without `selectors`, as `"type": "eoa"`.
+  Replace that with a `selectors` list for any contract you call.
+- Library: `selectorWarnings(policy)` returns the warnings for `allowAnySelector` destinations, and an allowed
+  `Verdict` (and a forwarded `Guard.check` result) carries `warnings` for each call `allowAnySelector` let
+  through; log them if you load policies yourself. `DestinationRule` has new optional fields `anySelector` and `eoa`.
 
 A 1.x entry such as
 
@@ -416,7 +429,10 @@ variables, and says what to do.
 
 - Convert your file: `npx l2-send-guard migrate-policy old-policy.json > policy.json`. It prints notes for
   anything it can't carry over. It never widens access: `requireApproval` destinations are left out (so still
-  refused), and contract creation allowed by only one chain overlay is not carried over.
+  refused), per-chain caps become the lowest one, and contract creation allowed by only one chain overlay is not
+  carried over. It refuses, and writes nothing, when the file has a key it doesn't know (it could be a limit) or
+  a destination that only one chain overlay allows (2.0 would allow it on every chain); split such a file into
+  one policy per chain.
 - `L2SG_POLICY_ENABLED`, `L2SG_POLICY_ALLOWLIST`, `L2SG_POLICY_GLOBAL_MAX_WEI` and the other `L2SG_POLICY_*`
   variables are gone. Put the rules in the file and set `L2SG_POLICY_FILE`.
 - A policy is now required. `L2SG_POLICY=off` keeps the 0.x "simulation only" behaviour.

@@ -8,8 +8,11 @@ It refuses to start rather than run with a weaker setup than you asked for. The 
 | --- | --- |
 | `no policy` | Set `L2SG_POLICY_FILE=./policy.json`, or `L2SG_POLICY=off` for simulation only |
 | `is a 0.x policy file` | `npx l2-send-guard migrate-policy old.json > policy.json`, then review it |
+| `not converted` (from `migrate-policy`) | The old file has a key the converter doesn't know, or a destination only one chain overlay allowed. Translate that part by hand, or split the file into one policy per chain |
+| `appears twice in the same object` | The policy file has the same key twice (often a destination listed twice). Merge the entries |
+| `without an explicit acknowledgement` | The policy has `"allowAnySelector": true`. List the functions in `selectors`, or, if you mean it, set `GUARD_ALLOW_ANY_SELECTOR=1`. `GUARD_MODE` doesn't change this |
 | `L2SG_POLICY_ENABLED` or another `L2SG_POLICY_*` | Removed in 1.0: move the rules into the policy file |
-| `no "selectors" list` | Since 2.0 every destination needs one. Add `"selectors": [...]` for a contract, `"type": "eoa"` for a plain account, or (on purpose only) `"allowAnySelector": true`. See [POLICY.md](./POLICY.md#contract-destinations) |
+| `no "selectors" list` | Since 2.0 every destination needs one. Add `"selectors": [...]` for a contract, `"type": "eoa"` for a plain account, or (on purpose only) `"allowAnySelector": true`. `migrate-policy` converts a whole 1.x file. See [POLICY.md](./POLICY.md#contract-destinations) |
 | `unknown chain` | Check the spelling in `L2SG_CHAINS` (`arb-sepolia`, `op-sepolia`, `base-sepolia`, `ethereum`, `arbitrum`, `optimism`, `base`, `sepolia`) |
 | `no public default RPC` | Mainnets need `L2SG_RPC_<NAME>`, e.g. `L2SG_RPC_BASE` |
 | `store … is in use by process` | Another proxy uses the same state file. Use one file per process, or Postgres for several |

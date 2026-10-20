@@ -44,6 +44,8 @@ export type Check =
       priorStatus?: IdemRecord["status"];
       reservationId?: string;
       idempotencyKey?: string;
+      /** Calls allowed only by allowAnySelector. The proxy prints each as a WARNING. */
+      warnings?: string[];
     }
   | {
       action: "deny";
@@ -228,7 +230,7 @@ export class Guard {
       for (const a of tx.authorizationList) {
         if (a.authority && (a.chainId === chainId || a.chainId === 0)) await store.noteSent(chainId, a.authority, a.nonce, tx.hash);
       }
-      return { action: "forward", tx, replay: false, reservationId, idempotencyKey: key };
+      return { action: "forward", tx, replay: false, reservationId, idempotencyKey: key, ...(verdict.warnings ? { warnings: verdict.warnings } : {}) };
     } catch (err) {
       if (err instanceof ChainReadError) {
         return deny("CHAIN_READ_FAILED", `couldn't read ${err.what} from the chain's RPC, so the guard can't check for bypasses; refusing to send: ${err.message}`, undefined, tx);

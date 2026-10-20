@@ -32,6 +32,83 @@ function addr(v: unknown, where: string): string {
   return v.toLowerCase();
 }
 
+/**
+ * Universal Router's MSG_SENDER (0x…01) and ADDRESS_THIS (0x…02) recipient constants. They stand for
+ * "the caller" and "the router", never a real account, so they can't be listed as one.
+ */
+const ROUTER_CONSTANTS = new Set(["0x0000000000000000000000000000000000000001", "0x0000000000000000000000000000000000000002"]);
+
+function realAddrs(v: unknown, where: string): Set<string> {
+  const out = addrs(v, where);
+  for (const a of out) {
+    if (ROUTER_CONSTANTS.has(a)) {
+      fail(where, `${a} is a Universal Router recipient constant (${a.endsWith("1") ? "MSG_SENDER" : "ADDRESS_THIS"}), not an account. Remove it`);
+    }
+  }
+  return out;
+}
+
+/**
+ * JSON.parse keeps the last of two equal keys, so a second entry for the same destination could
+ * silently replace a stricter first one. Find every key that appears twice in one object.
+ */
+export function duplicateJsonKeys(text: string): string[] {
+  const dups: string[] = [];
+  const stack: { keys: Set<string> | null; path: string; key?: string; expectKey: boolean }[] = [];
+  let i = 0;
+  const readString = (): string => {
+    const start = i;
+    i++;
+    while (i < text.length && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
+    i++;
+    return JSON.parse(text.slice(start, i)) as string;
+  };
+  const childPath = () => {
+    const top = stack[stack.length - 1];
+    if (!top) return "";
+    return top.keys ? `${top.path}${top.path ? "." : ""}${top.key}` : `${top.path}[]`;
+  };
+  while (i < text.length) {
+    const c = text[i]!;
+    if (c === '"') {
+      const top = stack[stack.length - 1];
+      const str = readString();
+      if (top?.keys && top.expectKey) {
+        if (top.keys.has(str)) dups.push(`${top.path}${top.path ? "." : ""}${str}`);
+        top.keys.add(str);
+        top.key = str;
+        top.expectKey = false;
+      }
+      continue;
+    }
+    if (c === "{" || c === "[") {
+      stack.push({ keys: c === "{" ? new Set() : null, path: childPath(), expectKey: c === "{" });
+    } else if (c === "}" || c === "]") {
+      stack.pop();
+    } else if (c === ",") {
+      const top = stack[stack.length - 1];
+      if (top?.keys) top.expectKey = true;
+    }
+    i++;
+  }
+  return dups;
+}
+
+/** JSON.parse, refusing a key that appears twice in one object. */
+export function parseJsonText(text: string, where: string): unknown {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch (err) {
+    throw new PolicyError(`${where} is not valid JSON: ${(err as Error).message}`);
+  }
+  const dups = duplicateJsonKeys(text);
+  if (dups.length > 0) {
+    throw new PolicyError(`${where}: ${dups.map((d) => `"${d}"`).join(", ")} ${dups.length === 1 ? "appears" : "appear"} twice in the same object; JSON keeps only the last one. Merge the entries`);
+  }
+  return json;
+}
+
 function addrs(v: unknown, where: string): Set<string> {
   if (v === undefined) return new Set();
   if (!Array.isArray(v)) fail(where, "must be an array of addresses");
@@ -118,7 +195,8 @@ export function parsePolicy(json: unknown, source = "policy"): Policy {
         `${missingSelectors.join(", ")}. Every destination must say which functions may be called on it (fail closed). ` +
         'For each: list them in "selectors" (["0x"] allows plain ETH transfers); ' +
         'or, for a plain account that only receives ETH, set "type": "eoa"; ' +
-        'or, to allow every function on purpose, set "allowAnySelector": true (a warning is printed at startup)'
+        'or, to allow every function on purpose, set "allowAnySelector": true (the proxy also needs GUARD_ALLOW_ANY_SELECTOR=1; warned on every call). ' +
+        "To convert a whole 1.x file: l2-send-guard migrate-policy <file>"
     );
   }
 
@@ -164,7 +242,7 @@ export function parsePolicy(json: unknown, source = "policy"): Policy {
     fail(`${source}.allowContractCreation`, "must be a boolean");
   }
 
-  const accounts = addrs(root.accounts, `${source}.accounts`);
+  const accounts = realAddrs(root.accounts, `${source}.accounts`);
   for (const a of accounts) {
     if (destinations.has(a)) {
       fail(
@@ -189,7 +267,7 @@ export function parsePolicy(json: unknown, source = "policy"): Policy {
     },
     delegation: { mode, delegates: addrs(del.delegates, `${source}.delegation.delegates`), allowAnyChain: del.allowAnyChain === true },
     accounts,
-    universalRouter: { recipients: addrs(ur.recipients, `${source}.universalRouter.recipients`) },
+    universalRouter: { recipients: realAddrs(ur.recipients, `${source}.universalRouter.recipients`) },
     allowContractCreation: root.allowContractCreation === true,
     typedData: { allowUnknown: td.allowUnknown === true },
   };
@@ -202,13 +280,7 @@ export function loadPolicyFile(path: string): Policy {
   } catch (err) {
     throw new PolicyError(`can't read policy file ${path}: ${(err as Error).message}`);
   }
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch (err) {
-    throw new PolicyError(`policy file ${path} is not valid JSON: ${(err as Error).message}`);
-  }
-  return parsePolicy(json, path);
+  return parsePolicy(parseJsonText(text, `policy file ${path}`), path);
 }
 
 /**
@@ -220,7 +292,7 @@ export function selectorWarnings(policy: Policy): string[] {
   for (const [d, r] of policy.destinations) {
     if (r.anySelector) {
       out.push(
-        `destination ${d} has "allowAnySelector": true. ANY function on it may be called, including ones that move or approve funds. List its functions in "selectors" instead unless you mean this`
+        `destination ${d} has "allowAnySelector": true. ANY function on it may be called, including ones that move or approve funds. List its functions in "selectors" instead unless you mean this. The proxy refuses to start with it unless GUARD_ALLOW_ANY_SELECTOR=1 is set, and then prints a warning for every call it lets through`
       );
     }
   }

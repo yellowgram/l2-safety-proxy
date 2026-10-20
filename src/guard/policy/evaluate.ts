@@ -54,15 +54,22 @@ const ACCOUNT_ADMIN_SELECTORS = new Map<string, string>(
  */
 export function evaluateTx(policy: Policy, tx: TxInput, opts: EvaluateOptions): Verdict {
   const spend: Spend = { native: 0n, tokens: new Map() };
+  const outer = warnings;
+  warnings = [];
   try {
     run(policy, tx, opts, spend);
-    return { allow: true, spend };
+    return warnings.length > 0 ? { allow: true, spend, warnings } : { allow: true, spend };
   } catch (err) {
     if (err instanceof Deny) return { allow: false, code: err.code, reason: err.message, path: err.path, spend };
     if (err instanceof DecodeDenied) return { allow: false, code: err.code as DenyCode, reason: err.message, path: err.path, spend };
     throw err;
+  } finally {
+    warnings = outer;
   }
 }
+
+/** Collects per-call warnings while evaluateTx runs (it is synchronous). */
+let warnings: string[] = [];
 
 function run(policy: Policy, tx: TxInput, opts: EvaluateOptions, spend: Spend) {
   const chainId = opts.chainId;
@@ -205,6 +212,10 @@ function judgeLeaf(policy: Policy, leaf: Extract<Leaf, { kind: "call" }>, ctx: L
  * and code can appear at an address later (CREATE2, 7702), so calldata presence decides.
  */
 function withinDestination(rule: DestinationRule, to: string, leaf: { data: Hex; value: bigint }, path: string, name?: string) {
+  if (rule.anySelector && leaf.data.length > 2) {
+    const sel = selectorOf(leaf.data) ?? leaf.data;
+    warnings.push(`allowAnySelector: function ${sel}${name ? ` (${name})` : ""} on ${to} at ${path} was allowed without a selectors list`);
+  }
   if (!rule.anySelector) {
     const plain = leaf.data.length <= 2;
     const sel = plain ? "0x" : selectorOf(leaf.data);

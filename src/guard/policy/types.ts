@@ -50,6 +50,8 @@ export interface Verdict {
   /** Where in the call tree the rule fired, e.g. tx>aggregate3[1]. */
   path?: string;
   spend: Spend;
+  /** On an allowed tx: calls let through only by a loud opt-in (allowAnySelector), one line each. */
+  warnings?: string[];
 }
 
 export type DenyCode =

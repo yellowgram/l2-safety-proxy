@@ -4,7 +4,7 @@ import {
 } from "./chains.js";
 import type { GuardSpec, ChainConfig, GuardConfig, GuardMode } from "../types/index.js";
 import { readFileSync } from "node:fs";
-import { parsePolicy, PolicyError } from "../guard/policy/load.js";
+import { parseJsonText, parsePolicy, PolicyError } from "../guard/policy/load.js";
 import type { Policy } from "../guard/policy/types.js";
 
 function env(key: string, fallback?: string): string | undefined {
@@ -17,6 +17,19 @@ function boolEnv(key: string, fallback: boolean): boolean {
   const v = process.env[key];
   if (v === undefined || v === "") return fallback;
   return ["1", "true", "yes", "on"].includes(v.toLowerCase());
+}
+
+/**
+ * GUARD_ALLOW_ANY_SELECTOR=1 (alias L2SG_ALLOW_ANY_SELECTOR): the operator accepts "allowAnySelector": true in
+ * the policy. Independent of GUARD_MODE. Anything other than a clear yes or no is an error.
+ */
+function allowAnySelectorAcknowledged(): boolean {
+  const key = env("GUARD_ALLOW_ANY_SELECTOR") !== undefined ? "GUARD_ALLOW_ANY_SELECTOR" : "L2SG_ALLOW_ANY_SELECTOR";
+  const raw = (env(key) ?? "").toLowerCase();
+  if (raw === "") return false;
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  throw new Error(`${key} must be 1 or 0 (got "${raw}")`);
 }
 
 function parseGuardMode(): GuardMode {
@@ -63,12 +76,13 @@ const LEGACY_POLICY_ENV = [
 const LEGACY_POLICY_KEYS = ["enabled", "allowAnyDestination", "globalMaxNativeWei", "globalMaxNativeEth", "erc20RecipientCheck", "humanGate"];
 
 export function readPolicyFile(path: string): Policy {
-  let json: unknown;
+  let text: string;
   try {
-    json = JSON.parse(readFileSync(path, "utf8"));
+    text = readFileSync(path, "utf8");
   } catch (err) {
     throw new PolicyError(`${path}: ${(err as Error).message}`);
   }
+  const json = parseJsonText(text, path);
   if (json && typeof json === "object" && LEGACY_POLICY_KEYS.some((k) => k in (json as object))) {
     throw new PolicyError(
       `${path} is a 0.x policy file. Convert it with: l2-send-guard migrate-policy ${path} > policy.json (see README#migrating)`
@@ -92,6 +106,7 @@ export function parseStoreSpec(raw: string | undefined): StoreSpec {
  * createGuardFromConfig for that.
  * Chains: L2SG_CHAINS=arb-sepolia,op-sepolia,base-sepolia (default) or mainnets with L2SG_RPC_<KEY>.
  * GUARD_MODE=strict|open (default strict). Alias: L2SG_GUARD_MODE.
+ * GUARD_ALLOW_ANY_SELECTOR=1 accepts "allowAnySelector": true in the policy (in either mode).
  * Policy: L2SG_POLICY_FILE=./policy.json, or L2SG_POLICY=off for simulation only.
  */
 /** The chains from L2SG_CHAINS and L2SG_RPC_*, without reading the policy. */
@@ -138,6 +153,18 @@ export function loadConfig(): GuardConfig {
   const policyOff = (env("L2SG_POLICY") ?? "").toLowerCase() === "off";
   if (policyFile && policyOff) throw new Error("Set L2SG_POLICY_FILE or L2SG_POLICY=off, not both");
   const policy = policyFile ? readPolicyFile(policyFile) : undefined;
+  if (policy) {
+    // allowAnySelector lifts a destination's function list. The policy file alone can't do that: whoever runs the
+    // proxy must acknowledge it separately, in either GUARD_MODE (open mode is about simulation, not this).
+    const any = [...policy.destinations].filter(([, r]) => r.anySelector).map(([a]) => a);
+    if (any.length > 0 && !allowAnySelectorAcknowledged()) {
+      throw new PolicyError(
+        `${policyFile}: "allowAnySelector": true on ${any.join(", ")}, so ANY function on ${any.length === 1 ? "it" : "them"} may be called. ` +
+          'Refusing to start without an explicit acknowledgement: list the functions the agent may call in "selectors", ' +
+          "or, if you mean it, set GUARD_ALLOW_ANY_SELECTOR=1 (any GUARD_MODE)"
+      );
+    }
+  }
   const ttl = Number(env("L2SG_IDEMPOTENCY_TTL_SECONDS", "86400"));
   if (!Number.isInteger(ttl) || ttl <= 0) throw new Error("L2SG_IDEMPOTENCY_TTL_SECONDS must be a positive integer");
   const bypass = (env("L2SG_BYPASS", "lock") ?? "lock").toLowerCase();

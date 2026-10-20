@@ -5,16 +5,16 @@
  *
  *   l2-send-guard [serve]                      start the proxy (env: see README)
  *   l2-send-guard check-policy <file>          validate a policy file and summarize it
- *   l2-send-guard migrate-policy <0.x file>    print the current form of a 0.x policy file
+ *   l2-send-guard migrate-policy <old file>    print the 2.0 form of a 0.x or 1.x policy file
  *   l2-send-guard unlock <address> --chain <id> clear a bypass lock (uses L2SG_STORE)
  */
 import { readFileSync } from "node:fs";
 import { getAddress } from "viem";
 import { loadChainsOnly, loadConfig, parseStoreSpec, readPolicyFile } from "./config/env.js";
 import { createGuardFromConfig, openStore, rpcReader, startWatch } from "./config/guard.js";
-import { migrateLegacyPolicy } from "./config/migrate.js";
+import { MigrateError, migrateLegacyPolicy } from "./config/migrate.js";
 import { Guard } from "./guard/guard.js";
-import { parsePolicy, selectorWarnings } from "./guard/policy/load.js";
+import { parseJsonText, parsePolicy, PolicyError, selectorWarnings } from "./guard/policy/load.js";
 import type { Policy } from "./guard/policy/types.js";
 import { listen } from "./proxy/server.js";
 import { PACKAGE_VERSION } from "./version.js";
@@ -23,7 +23,7 @@ const USAGE = `l2-send-guard ${PACKAGE_VERSION}
 usage:
   l2-send-guard [serve]                         start the proxy
   l2-send-guard check-policy <file>             validate a policy file and summarize it
-  l2-send-guard migrate-policy <0.x-file>       print the current form of a 0.x policy file
+  l2-send-guard migrate-policy <old-file>       print the 2.0 form of a 0.x or 1.x policy file
   l2-send-guard unlock <address> --chain <id>   clear a bypass lock in L2SG_STORE`;
 
 function die(msg: string): never {
@@ -84,9 +84,14 @@ async function main(argv: string[]): Promise<void> {
   }
   if (cmd === "migrate-policy") {
     if (rest.length !== 1) die(USAGE);
-    const old = JSON.parse(readFileSync(rest[0]!, "utf8"));
-    const { policy, notes } = migrateLegacyPolicy(old);
-    parsePolicy(policy, "migrated policy");
+    let converted: ReturnType<typeof migrateLegacyPolicy>;
+    try {
+      converted = migrateLegacyPolicy(parseJsonText(readFileSync(rest[0]!, "utf8"), rest[0]!));
+    } catch (err) {
+      if (err instanceof MigrateError || err instanceof PolicyError) die(`${rest[0]}: not converted: ${err.message}`);
+      throw err;
+    }
+    const { policy, notes } = converted;
     console.log(JSON.stringify(policy, null, 2));
     for (const n of notes) console.error(`note: ${n}`);
     return;

@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { encodeAbiParameters, encodeFunctionData, encodePacked, parseAbi, parseAbiParameters, toFunctionSelector, type Address, type Hex } from "viem";
+import { loadConfig } from "../../src/config/env.js";
 import { migrateLegacyPolicy } from "../../src/config/migrate.js";
 import { evaluateTx } from "../../src/guard/policy/evaluate.js";
 import { parsePolicy, PolicyError, selectorWarnings } from "../../src/guard/policy/load.js";
@@ -104,7 +105,7 @@ describe("loading: every destination needs a function list or an explicit opt-in
     const w = selectorWarnings(p);
     expect(w).toHaveLength(1);
     expect(w[0]).toBe(
-      `destination ${dex} has "allowAnySelector": true. ANY function on it may be called, including ones that move or approve funds. List its functions in "selectors" instead unless you mean this`
+      `destination ${dex} has "allowAnySelector": true. ANY function on it may be called, including ones that move or approve funds. List its functions in "selectors" instead unless you mean this. The proxy refuses to start with it unless GUARD_ALLOW_ANY_SELECTOR=1 is set, and then prints a warning for every call it lets through`
     );
     expect(selectorWarnings(parsePolicy({ destinations: { [ATTACKER]: { selectors: [SWAP_SIG] } } }))).toEqual([]);
   });
@@ -250,11 +251,11 @@ describe("migrate-policy writes value-only destinations", () => {
 });
 
 /** Start `serve` with a policy file; resolve with its stderr once it logs `until` or exits. */
-function serve(policy: unknown, until: RegExp): Promise<{ stderr: string; exited: number | null }> {
+function serve(policy: unknown, until: RegExp, extraEnv: Record<string, string> = {}): Promise<{ stderr: string; exited: number | null }> {
   const f = join(mkdtempSync(join(tmpdir(), "l2sg-sel-")), "policy.json");
   writeFileSync(f, JSON.stringify(policy));
   const child = spawn(process.execPath, [join("node_modules", "tsx", "dist", "cli.mjs"), "src/index.ts", "serve"], {
-    env: { ...process.env, L2SG_POLICY_FILE: f, L2SG_STORE: "memory", L2SG_PORT: "0", L2SG_CHAINS: "arb-sepolia", L2SG_RPC_ARB_SEPOLIA: "http://127.0.0.1:9", L2SG_BYPASS: "off" },
+    env: { ...process.env, L2SG_POLICY_FILE: f, L2SG_STORE: "memory", L2SG_PORT: "0", L2SG_CHAINS: "arb-sepolia", L2SG_RPC_ARB_SEPOLIA: "http://127.0.0.1:9", L2SG_BYPASS: "off", GUARD_MODE: "", L2SG_GUARD_MODE: "", L2SG_FAIL_OPEN: "", GUARD_ALLOW_ANY_SELECTOR: "", L2SG_ALLOW_ANY_SELECTOR: "", ...extraEnv },
   });
   let stderr = "";
   let stdout = "";
@@ -281,11 +282,70 @@ describe("serve startup", () => {
     expect(r.stderr).toContain(`refusing to start: `);
     expect(r.stderr).toContain(`this destination has no "selectors" list: ${dex}`);
   }, 30_000);
-  it("starts with allowAnySelector and prints a loud WARNING for it", async () => {
-    const r = await serve({ destinations: { [DEX]: { allowAnySelector: true }, [ALLOWED]: { type: "eoa" } } }, /WARNING/);
+  it("refuses allowAnySelector without GUARD_ALLOW_ANY_SELECTOR=1, in strict and in open mode", async () => {
+    for (const mode of [{}, { GUARD_MODE: "open" }]) {
+      const r = await serve({ destinations: { [DEX]: { allowAnySelector: true }, [ALLOWED]: { type: "eoa" } } }, /refusing to start/, mode);
+      expect(r.stderr).toContain(`"allowAnySelector": true on ${dex}, so ANY function on it may be called. Refusing to start without an explicit acknowledgement`);
+      expect(r.stderr).toContain("set GUARD_ALLOW_ANY_SELECTOR=1 (any GUARD_MODE)");
+    }
+  }, 30_000);
+  it("GUARD_ALLOW_ANY_SELECTOR=1 starts in strict mode and prints a loud WARNING for it", async () => {
+    const r = await serve({ destinations: { [DEX]: { allowAnySelector: true }, [ALLOWED]: { type: "eoa" } } }, /WARNING/, { GUARD_ALLOW_ANY_SELECTOR: "1" });
     expect(r.stderr).toContain(`[l2-send-guard] WARNING: destination ${dex} has "allowAnySelector": true. ANY function on it may be called`);
     expect(r.stderr).not.toContain(ALLOWED.toLowerCase());
+    expect(r.stderr).not.toContain("refusing to start");
   }, 30_000);
+});
+
+describe("the allowAnySelector acknowledgement is separate from GUARD_MODE", () => {
+  const anyPolicy = () => {
+    const f = join(mkdtempSync(join(tmpdir(), "l2sg-ack-")), "policy.json");
+    writeFileSync(f, JSON.stringify({ destinations: { [DEX]: { allowAnySelector: true } } }));
+    return f;
+  };
+  const load = (vars: Record<string, string>, file = anyPolicy()) => {
+    const keys = ["GUARD_MODE", "L2SG_GUARD_MODE", "L2SG_FAIL_OPEN", "GUARD_ALLOW_ANY_SELECTOR", "L2SG_ALLOW_ANY_SELECTOR", "L2SG_POLICY", "L2SG_CHAINS"];
+    for (const k of keys) vi.stubEnv(k, "");
+    vi.stubEnv("L2SG_POLICY_FILE", file);
+    for (const [k, v] of Object.entries(vars)) vi.stubEnv(k, v);
+    try {
+      return loadConfig();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  };
+  it("without it, both modes refuse; strict mode is the default and stays strict", () => {
+    for (const mode of [{}, { GUARD_MODE: "strict" }, { GUARD_MODE: "open" }, { L2SG_FAIL_OPEN: "true" }]) {
+      expect(() => load(mode)).toThrow(PolicyError);
+      expect(() => load(mode)).toThrow(/Refusing to start without an explicit acknowledgement.*GUARD_ALLOW_ANY_SELECTOR=1/);
+    }
+  });
+  it("with it, both modes start, and the mode is unchanged", () => {
+    const loaded = (vars: Record<string, string>) => {
+      let err: unknown;
+      let cfg: ReturnType<typeof loadConfig> | undefined;
+      try {
+        cfg = load(vars);
+      } catch (e) {
+        err = e;
+      }
+      expect(err, String(err)).toBeUndefined();
+      return cfg;
+    };
+    expect(loaded({ GUARD_ALLOW_ANY_SELECTOR: "1" })).toMatchObject({ guardMode: "strict", failOpen: false });
+    expect(loaded({ GUARD_ALLOW_ANY_SELECTOR: "true", GUARD_MODE: "open" })).toMatchObject({ guardMode: "open", failOpen: true });
+    expect(loaded({ L2SG_ALLOW_ANY_SELECTOR: "yes" })).toMatchObject({ guardMode: "strict" });
+  });
+  it("0, off or false don't acknowledge; anything unclear is an error", () => {
+    for (const v of ["0", "off", "false", "no"]) expect(() => load({ GUARD_ALLOW_ANY_SELECTOR: v })).toThrow(/explicit acknowledgement/);
+    expect(() => load({ GUARD_ALLOW_ANY_SELECTOR: "maybe" })).toThrow('GUARD_ALLOW_ANY_SELECTOR must be 1 or 0 (got "maybe")');
+    expect(() => load({ GUARD_ALLOW_ANY_SELECTOR: "0", L2SG_ALLOW_ANY_SELECTOR: "1" })).toThrow(/explicit acknowledgement/);
+  });
+  it("a policy without allowAnySelector doesn't need it", () => {
+    const f = join(mkdtempSync(join(tmpdir(), "l2sg-ack-")), "policy.json");
+    writeFileSync(f, JSON.stringify({ destinations: { [DEX]: { selectors: [SWAP_SIG] } } }));
+    expect(() => load({}, f)).not.toThrow();
+  });
 });
 
 describe("through the proxy", () => {
@@ -306,6 +366,41 @@ describe("through the proxy", () => {
     });
     expect(forward).not.toHaveBeenCalled();
     expect(simulate).not.toHaveBeenCalled();
+  });
+});
+
+describe("allowAnySelector is reported on every request it lets through", () => {
+  it("evaluateTx returns one warning per call allowed only by allowAnySelector; none otherwise", async () => {
+    const p = withDex({ allowAnySelector: true });
+    const v = await judge(p, { to: DEX, data: OTHER });
+    expect(v.allow).toBe(true);
+    expect(v.warnings).toEqual([`allowAnySelector: function ${OTHER} on ${dex} at tx was allowed without a selectors list`]);
+    const nested = await judge(p, { to: MULTICALL3, data: aggregate3([{ target: DEX, callData: swapData }, { target: DEX, callData: OTHER }]) });
+    expect(nested.warnings).toEqual([
+      `allowAnySelector: function ${SWAP.toLowerCase()} on ${dex} at tx>aggregate3[0] was allowed without a selectors list`,
+      `allowAnySelector: function ${OTHER} on ${dex} at tx>aggregate3[1] was allowed without a selectors list`,
+    ]);
+    expect((await judge(p, { to: DEX, value: 1n })).warnings).toBeUndefined();
+    expect((await judge(withDex({ selectors: [SWAP_SIG] }), { to: DEX, data: swapData })).warnings).toBeUndefined();
+    expect((await judge(p, { to: DEX, data: approveMax })).warnings).toBeUndefined();
+  });
+  it("the proxy prints a WARNING line per request and still forwards it (strict mode)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const forward = vi.fn(async () => ({ jsonrpc: "2.0" as const, id: 1, result: "0xok" }));
+      const simulate = vi.fn(async () => ({ ok: true, certainty: "high", confidence: "high" }));
+      const config = {
+        listenHost: "127.0.0.1", listenPort: 0, guardMode: "strict", failOpen: false, defaultChain: "base",
+        guard: new Guard({ policy: withDex({ allowAnySelector: true }), store: new MemoryStore() }),
+        chains: { base: { id: "base", name: "Base", chainId: CHAIN, upstreamRpcUrl: "http://up", preferSimulateV1: true, ecosystem: "op" } },
+      } as unknown as GuardConfig;
+      const raw = await sign({ to: DEX, data: OTHER, nonce: 0 });
+      await handleRequest(config, { jsonrpc: "2.0", id: 1, method: "eth_sendRawTransaction", params: [raw] } as never, undefined, { simulate, forward } as never);
+      expect(warn).toHaveBeenCalledWith(`[l2-send-guard] WARNING: allowAnySelector: function ${OTHER} on ${dex} at tx was allowed without a selectors list`);
+      expect(forward).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

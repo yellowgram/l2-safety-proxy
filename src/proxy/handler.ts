@@ -489,6 +489,7 @@ export async function handleRequest(
           ...(carried.raws.length > 1 ? { index: i } : {}),
         });
       }
+      for (const w of c.warnings ?? []) console.warn(`[l2-send-guard] WARNING: ${w}`);
       checks.push(c);
     }
   }

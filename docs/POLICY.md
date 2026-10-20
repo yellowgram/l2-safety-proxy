@@ -1,6 +1,6 @@
 # Policy reference
 
-A policy is one JSON file. Unknown keys are errors, addresses are case-insensitive, and every amount is a
+A policy is one JSON file. Unknown keys and keys written twice in one object are errors, addresses are case-insensitive, and every amount is a
 decimal **string** of raw units (wei for ETH, the token's smallest unit for tokens: `"1000000"` is 1 USDC).
 Check a file with `npx l2-send-guard check-policy policy.json`.
 
@@ -48,7 +48,7 @@ every such destination. See [Contract destinations](#contract-destinations).
 | `…maxNativeWei` | no cap | ETH per call to this destination |
 | `…selectors` | — (required for contracts) | Functions that may be called, as 4-byte selectors or signatures. `"0x"` allows plain ETH transfers (empty calldata) |
 | `…type` | — | `"eoa"`: a plain account. Only plain ETH transfers (empty calldata); takes no `selectors`. `"contract"` is accepted and means the default: a `selectors` list or `allowAnySelector` is required |
-| `…allowAnySelector` | `false` | `true` allows **every** function on this destination. Explicit opt-in, printed as a `WARNING` at startup and by `check-policy`. Can't be combined with `selectors` |
+| `…allowAnySelector` | `false` | `true` allows **every** function on this destination. Explicit opt-in. The proxy refuses to start with it unless `GUARD_ALLOW_ANY_SELECTOR=1` is also set (in either `GUARD_MODE`), then prints a `WARNING` at startup, in `check-policy`, and for every call it lets through. Can't be combined with `selectors` |
 | `tokens.<address>` | — | A token the agent may transfer or approve. Token calls are judged here, not under `destinations` |
 | `…transfer.recipients` | none | Who may receive the token (the sender itself always may) |
 | `…transfer.maxAmountRaw` | no cap | Per transfer |
@@ -61,8 +61,8 @@ every such destination. See [Contract destinations](#contract-destinations).
 | `delegation.mode` | `deny` | `deny` refuses every EIP-7702 delegation; `allowlist` allows `delegates` |
 | `delegation.delegates` | none | Contracts the account may delegate to |
 | `delegation.allowAnyChain` | `false` | Allow authorizations signed for chain id 0 (valid on every chain) |
-| `accounts` | none | Smart accounts the agent owns (its Safe, its 4337 wallet). Calls they make are checked one by one, they don't need to be destinations, and their admin functions (modules, owners, threshold, guards, fallback handler) are always refused. So is any other function called on the account itself (or on the sender) that is not a wrapper the guard unpacks (`execute`, `executeBatch`, 7579 `execute`, `multicall`), such as `upgradeToAndCall` or `addOwnerAddress`. An address can't be both an account and a destination |
-| `universalRouter.recipients` | none | Extra addresses a swap's output may go to. The sender and one of `accounts` always may; any other contract in the same transaction (Multicall3, another router) may not (`ROUTER_PAYOUT_TO_WRAPPER`) unless listed here. The router that runs the command (`ADDRESS_THIS`) is only an intermediate step: what a plan puts there must leave in the same plan (`ROUTER_OUTPUT_STRANDED`). |
+| `accounts` | none | Smart accounts the agent owns (its Safe, its 4337 wallet). Calls they make are checked one by one, they don't need to be destinations, and their admin functions (modules, owners, threshold, guards, fallback handler) are always refused. So is any other function called on the account itself (or on the sender) that is not a wrapper the guard unpacks (`execute`, `executeBatch`, 7579 `execute`, `multicall`), such as `upgradeToAndCall` or `addOwnerAddress`. An address can't be both an account and a destination, and the router constants `0x…01`/`0x…02` can't be accounts |
+| `universalRouter.recipients` | none | Extra addresses a swap's output may go to. The sender and one of `accounts` always may; any other contract in the same transaction (Multicall3, another router) may not (`ROUTER_PAYOUT_TO_WRAPPER`) unless listed here. The router that runs the command (`ADDRESS_THIS`) is only an intermediate step: what a plan puts there must leave in the same plan (`ROUTER_OUTPUT_STRANDED`). `0x…01`/`0x…02` can't be listed |
 | `allowContractCreation` | `false` | Allow deploying contracts |
 | `typedData.allowUnknown` | `false` | Let the guarded signer sign EIP-712 messages it can't check |
 | `note` | — | Free text on destinations and tokens, ignored |
@@ -92,6 +92,9 @@ A destination is fail-closed: unless you say otherwise, the agent may not call a
   is an explicit `allow…: true` boolean (`allowContractCreation`, `typedData.allowUnknown`,
   `delegation.allowAnyChain`), a boolean can't be mistaken for a selector or a typo in a list, and it can't
   silently mix with a list (both together are an error). `"selectors": "*"` is refused with a pointer to it.
+- **Why it also needs `GUARD_ALLOW_ANY_SELECTOR=1`:** whoever runs the proxy has to agree to it, not only whoever
+  edits the policy file. It is an environment variable like `GUARD_MODE` but independent of it, so accepting one
+  wildcard destination never forces fail-open simulation (`GUARD_MODE=open`), and `open` doesn't accept it either.
 
 ## How a transaction is judged
 

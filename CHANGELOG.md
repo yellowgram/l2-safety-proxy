@@ -19,6 +19,9 @@ on it, so allowlisting a contract such as a DEX router allowed all of its functi
 - ETH sent along with a token call must be allowed by the token's own destination entry (`selectors` and
   `maxNativeWei`). Before, any listing of the token as a destination was enough.
 - `migrate-policy` writes 0.x destinations as `"type": "eoa"`, with a note to add `selectors` for contracts.
+  It also converts 1.x files: every cap, token, account and recipient is kept as is, and each destination
+  without `selectors` becomes `"type": "eoa"`. It refuses, writing nothing, a file with an unknown key (0.x or
+  1.x), a 0.x destination that only one chain overlay allowed, or a file that mixes the two formats.
 - `"selectors": "*"` is refused with a pointer to `allowAnySelector`.
 - Universal Router payouts are bound to the router that runs the command. A payout may go to the sender, one of
   `accounts`, or a `universalRouter.recipients` entry. In 1.x a payout to
@@ -34,14 +37,23 @@ on it, so allowlisting a contract such as a DEX router allowed all of its functi
   `ROUTER_OUTPUT_STRANDED`: `SWEEP` and `execute` have no caller check, so anyone can take a balance left in
   the router. A sweep back to `ADDRESS_THIS`, a `TRANSFER` or `PAY_PORTION` of part of the balance, and a
   command flagged "allow revert" don't count. In 1.x a swap to `ADDRESS_THIS` with nothing after it was allowed.
+- The proxy refuses to start with a policy that has `"allowAnySelector": true` unless `GUARD_ALLOW_ANY_SELECTOR=1`
+  is also set, in either `GUARD_MODE`.
+- `accounts` and `universalRouter.recipients` refuse `0x…01` and `0x…02` (the router's `MSG_SENDER` and
+  `ADDRESS_THIS` constants).
+- A policy file with a key written twice in one object is refused (`check-policy`, `serve`, `migrate-policy`,
+  `loadPolicyFile`). Before, JSON parsing kept the last one, so a later entry could silently replace a stricter one.
 - A payout to one of `accounts` is allowed even when that account isn't part of the transaction (in 1.x only
   when it was a wrapper in it).
 
 ### Added
 
-- `"allowAnySelector": true` per destination: the explicit opt-in to allow every function. The proxy prints a
-  `WARNING` line for each such destination at startup, and `check-policy` prints it and counts them in its
-  summary.
+- `"allowAnySelector": true` per destination: the explicit opt-in to allow every function. The proxy also needs
+  the operator's acknowledgement `GUARD_ALLOW_ANY_SELECTOR=1` (alias `L2SG_ALLOW_ANY_SELECTOR`), independent of
+  `GUARD_MODE`. It prints a `WARNING` line for each such destination at startup and for every call
+  it lets through only because of it, and `check-policy` prints it and counts them in its summary.
+- `Verdict.warnings` and `warnings` on a forwarded `Guard.check` result: one line per call `allowAnySelector`
+  let through.
 - `"type": "eoa"` per destination (`"contract"` is also accepted and is the default).
 - `selectorWarnings(policy)` in the library, for callers that load policies themselves.
 - A `hint` for `SELECTORS_REQUIRED` in `error.data`.
