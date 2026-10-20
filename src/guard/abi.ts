@@ -58,6 +58,8 @@ export const WRAPPER_ABI = parseAbi([
   // Uniswap Universal Router
   "function execute(bytes commands, bytes[] inputs)",
   "function execute(bytes commands, bytes[] inputs, uint256 deadline)",
+  // Universal Router 2.1: runs the same commands as execute, with an EIP-712 signature checked first
+  "function executeSigned(bytes commands, bytes[] inputs, bytes32 intent, bytes32 data, bool verifySender, bytes32 nonce, bytes signature, uint256 deadline)",
 ]);
 
 export const TOKEN_ABI = parseAbi([

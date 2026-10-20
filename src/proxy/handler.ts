@@ -221,6 +221,8 @@ const HINTS: Record<string, string> = {
   NON_CANONICAL_ABI:
     "The calldata isn't the exact standard ABI encoding the contract reads (extra trailing bytes, unusual offsets, dirty padding, or a malformed swap path). Re-encode it with a standard encoder and drop any suffix.",
   ROUTER_OUTPUT_STRANDED: "The swap plan leaves funds in the Universal Router, where anyone could take them. End the plan with SWEEP (or UNWRAP_WETH) to MSG_SENDER.",
+  ROUTER_V4_HOOK_NOT_ALLOWED:
+    'The swap routes through a Uniswap V4 pool with a hook the policy doesn\'t list. Route through pools without hooks, or add the hook to "universalRouter.v4Hooks" if you trust its code.',
   SELECTORS_REQUIRED: 'This destination has no "selectors" list, so no function on it may be called. Add the function to its "selectors" in the policy.',
 };
 

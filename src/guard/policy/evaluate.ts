@@ -1,6 +1,6 @@
 import { toFunctionSelector, zeroAddress, type Address, type Hex } from "viem";
 import { EFFECTIVELY_UNLIMITED, MAX_CALLDATA_BYTES, NonCanonicalAbi, UINT160_MAX, decodeKnown, selectorOf } from "../abi.js";
-import { DecodeDenied, UR_WETH, flattenCalls, type Leaf } from "../calls.js";
+import { DecodeDenied, UR_WETH, flattenCalls, ur21Routers, type Leaf } from "../calls.js";
 import type { Authorization } from "../tx.js";
 import { permit2For } from "./load.js";
 import type { DenyCode, DestinationRule, Policy, Spend, TokenRule, Verdict } from "./types.js";
@@ -84,7 +84,10 @@ function run(policy: Policy, tx: TxInput, opts: EvaluateOptions, spend: Spend) {
   checkAuthorizations(policy, tx.authorizationList ?? [], chainId);
 
   const permit2 = permit2For(policy, chainId);
-  const flat = flattenCalls({ to: tx.to, value: tx.value, data: tx.data }, { sender: tx.from, accounts: policy.accounts, permit2, weth: UR_WETH[chainId] });
+  const flat = flattenCalls(
+    { to: tx.to, value: tx.value, data: tx.data },
+    { sender: tx.from, accounts: policy.accounts, permit2, weth: UR_WETH[chainId], ur21: ur21Routers(chainId), v4Hooks: policy.universalRouter.v4Hooks }
+  );
   const sender = tx.from ? lc(tx.from) : undefined;
 
   // A wrapper (Multicall3, a router, someone else's Safe) must itself be an allowed

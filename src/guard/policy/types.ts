@@ -9,7 +9,8 @@ export interface Policy {
   permit2: { addresses: Map<number, string>; defaultAddress: string; maxExpirySeconds: number };
   delegation: { mode: "deny" | "allowlist"; delegates: Set<string>; allowAnyChain: boolean };
   accounts: Set<string>;
-  universalRouter: { recipients: Set<string> };
+  /** recipients: extra payees for router payouts. v4Hooks: V4 hook contracts allowed in a pool key. */
+  universalRouter: { recipients: Set<string>; v4Hooks: Set<string> };
   allowContractCreation: boolean;
   typedData: { allowUnknown: boolean };
 }
@@ -87,6 +88,7 @@ export type DenyCode =
   | "ROUTER_RECIPIENT_NOT_ALLOWED"
   | "ROUTER_PAYOUT_TO_WRAPPER"
   | "ROUTER_OUTPUT_STRANDED"
+  | "ROUTER_V4_HOOK_NOT_ALLOWED"
   | "WINDOW_CAP_EXCEEDED"
   | "TYPED_DATA_UNKNOWN"
   | "STORE_DOWN"

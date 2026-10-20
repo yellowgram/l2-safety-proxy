@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { isAddress, toFunctionSelector } from "viem";
-import { PERMIT2_DEFAULT, PERMIT2_ZKSYNC } from "../abi.js";
+import { PERMIT2_DEFAULT, PERMIT2_ZKSYNC, ZERO_ADDRESS } from "../abi.js";
 import type { DestinationRule, Policy, TokenRule } from "./types.js";
 
 export class PolicyError extends Error {}
@@ -45,6 +45,13 @@ function realAddrs(v: unknown, where: string): Set<string> {
       fail(where, `${a} is a Universal Router recipient constant (${a.endsWith("1") ? "MSG_SENDER" : "ADDRESS_THIS"}), not an account. Remove it`);
     }
   }
+  return out;
+}
+
+/** universalRouter.v4Hooks: hook contracts. The zero address means "no hook" and is always allowed. */
+function hookAddrs(v: unknown, where: string): Set<string> {
+  const out = realAddrs(v, where);
+  if (out.has(ZERO_ADDRESS)) fail(where, `${ZERO_ADDRESS} is "no hook", which is always allowed. Remove it`);
   return out;
 }
 
@@ -235,7 +242,7 @@ export function parsePolicy(json: unknown, source = "policy"): Policy {
   if (del.allowAnyChain !== undefined && typeof del.allowAnyChain !== "boolean") fail(`${source}.delegation.allowAnyChain`, "must be a boolean");
 
   const ur = obj(root.universalRouter, `${source}.universalRouter`);
-  only(ur, ["recipients"], `${source}.universalRouter`);
+  only(ur, ["recipients", "v4Hooks"], `${source}.universalRouter`);
   const td = obj(root.typedData, `${source}.typedData`);
   only(td, ["allowUnknown"], `${source}.typedData`);
   if (root.allowContractCreation !== undefined && typeof root.allowContractCreation !== "boolean") {
@@ -267,7 +274,10 @@ export function parsePolicy(json: unknown, source = "policy"): Policy {
     },
     delegation: { mode, delegates: addrs(del.delegates, `${source}.delegation.delegates`), allowAnyChain: del.allowAnyChain === true },
     accounts,
-    universalRouter: { recipients: realAddrs(ur.recipients, `${source}.universalRouter.recipients`) },
+    universalRouter: {
+      recipients: realAddrs(ur.recipients, `${source}.universalRouter.recipients`),
+      v4Hooks: hookAddrs(ur.v4Hooks, `${source}.universalRouter.v4Hooks`),
+    },
     allowContractCreation: root.allowContractCreation === true,
     typedData: { allowUnknown: td.allowUnknown === true },
   };
