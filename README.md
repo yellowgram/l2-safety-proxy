@@ -53,6 +53,9 @@ npm ci && npm run demo
 6b. agent retries with a fresh nonce             -32087 IDEMPOTENCY_CONFLICT — idempotency key already used for 0xb135… That transaction was sent; don't send a second one under this key.
 ```
 
+A guided offline walkthrough of both layers — Layer 2 policy deny (`-32083`) and Layer 1
+simulation abort (`-32080`) — is in [docs/DEMO.md](./docs/DEMO.md).
+
 **2. Write your policy.** Start from [`policy.example.json`](./policy.example.json) and put in your own
 addresses. Amounts are decimal strings in raw units (wei, or the token's smallest unit). This one lets the
 agent pay one address up to 0.05 ETH at a time and 0.2 ETH a day, and send it up to 250 USDC at a time and
