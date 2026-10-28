@@ -425,6 +425,8 @@ curl http://127.0.0.1:8545/health
 
 The compose file publishes the port on `127.0.0.1` only and keeps state in a volume.
 
+Running behind a reliability router such as eRPC? The guard is a policy layer, not a load balancer: point `L2SG_RPC_<NAME>` at eRPC and keep failover and caching there — do not rebuild them in the guard. See [docs/COMPOSE_ERPC.md](./docs/COMPOSE_ERPC.md).
+
 ## Migrating
 
 ### From l2-send-guard 2.0 to 2.1
